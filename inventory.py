@@ -62,5 +62,21 @@ async def arrest_check(interaction: discord.Interaction):
 
     report = "\n".join([f"{name}: {count} عملية قبض" for name, count in stats.items()])
     await interaction.followup.send(f"تقرير وحدة إلقاء القبض:\n{report}")
+    # أمر البحث عن طريق الأيدي (ID)
+@bot.command(name="id")
+async def id_command(ctx, user_id: int):
+    # شرط الروم المحددة
+    if ctx.channel.id != 1526667964038910093:
+        return # لا يفعل شيئاً إذا كان في روم أخرى
+
+    try:
+        # البحث عن العضو في السيرفر باستخدام الأيدي
+        member = ctx.guild.get_member(user_id)
+        if member:
+            await ctx.send(f"الشخص المقصود هو: {member.mention}")
+        else:
+            await ctx.send("عذراً، لم أجد شخصاً يحمل هذا الأيدي في السيرفر.")
+    except Exception as e:
+        await ctx.send("حدث خطأ أثناء البحث عن الأيدي.")
 
 bot.run(TOKEN)
