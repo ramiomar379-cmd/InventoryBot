@@ -3,6 +3,20 @@ from discord.ext import commands
 import os
 from dotenv import load_dotenv
 import datetime
+from flask import Flask
+from threading import Thread
+
+# --- تشغيل الويب لضمان عمل البوت على Render ---
+app = Flask(__name__)
+@app.route('/')
+def home():
+    return "البوت يعمل!"
+
+def run_web():
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+
+Thread(target=run_web).start()
+# ---------------------------------------------
 
 load_dotenv()
 TOKEN = os.getenv('TOKEN')
