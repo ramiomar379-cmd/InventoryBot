@@ -1,11 +1,11 @@
 import discord
 from discord.ext import commands
-import datetime
 import os
 from dotenv import load_dotenv
+import datetime
 
 load_dotenv()
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv('TOKEN')
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -14,43 +14,53 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# الإعدادات الجديدة
-NORMAL_CHANNELS = [1526668339391365170, 1526668345448075284, 1526668348262187188]
-DOUBLE_CHANNEL = 1526668342444949696
-ALLOWED_CHANNEL_ID = 1526668727657955418
+# الإعدادات
+NORMAL_CHANNELS = [1526668395406430308, 1526668405619560468, 1526668402947653823, 1526668398719926362]
+DOUBLE_CHANNEL = 1526668405619560468
+ALLOWED_CHANNEL_ID = 1526668730673664010 
+# قائمة أيديات الضباط المسموح بجرد عمليات القبض الخاصة بهم
+ALLOWED_OFFICER_IDS = [1526668395406430308, 1526668405619560468, 1526668402947653823, 1526668398719926362]
 
 @bot.event
 async def on_ready():
     await bot.tree.sync()
-    print(f'✅ بوت الجرد جاهز: {bot.user}')
+    print(f'البوت جاهز ✅ {bot.user}')
 
-@bot.tree.command(name="check", description="جرد الصور للضباط")
-async def inventory(interaction: discord.Interaction):
-    # شرط الروم
-    if interaction.channel.id != ALLOWED_CHANNEL_ID:
-        await interaction.response.send_message(f"❌ هذا الأمر يعمل فقط في روم خاص بالجرد.", ephemeral=True)
-        return
-
-    await interaction.response.send_message("⏳ جاري الجرد...")
-    
+@bot.tree.command(name="check", description="جرد الضباط")
+async def check(interaction: discord.Interaction):
+    await interaction.response.defer()
     eight_days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)
-    stats = {} # سنحفظ فيه ID المستخدم ليتم عمل منشن له
+    stats = {}
 
-    for channel_id in NORMAL_CHANNELS + [DOUBLE_CHANNEL]:
+    for channel_id in NORMAL_CHANNELS:
         channel = bot.get_channel(channel_id)
         if not channel: continue
-        
         async for message in channel.history(after=eight_days_ago, limit=None):
-            if message.attachments and message.author:
-                weight = 2 if message.channel.id == DOUBLE_CHANNEL else 1
-                stats[message.author.id] = stats.get(message.author.id, 0) + weight
+            if message.author.bot: continue
+            weight = 2 if message.channel.id == DOUBLE_CHANNEL else 1
+            stats[message.author.name] = stats.get(message.author.name, 0) + weight
+    
+    report = "\n".join([f"{name}: {score} نقطة" for name, score in stats.items()])
+    await interaction.followup.send(f"تقرير الجرد:\n{report}")
 
-    sorted_stats = sorted(stats.items(), key=lambda x: x[1], reverse=True)
+@bot.tree.command(name="arrest_check", description="جرد وحدة إلقاء القبض")
+async def arrest_check(interaction: discord.Interaction):
+    if interaction.channel.id != ALLOWED_CHANNEL_ID:
+        await interaction.response.send_message("هذا الأمر يعمل فقط في روم إلقاء القبض.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
     
-    msg = "**📊 تقرير الجرد (منشن):**\n\n"
-    for user_id, count in sorted_stats:
-        msg += f"👤 <@{user_id}>: {count} صورة\n"
-    
-    await interaction.edit_original_response(content=msg if sorted_stats else "❌ لا توجد بيانات في آخر 8 أيام.")
+    stats = {}
+    channel = bot.get_channel(ALLOWED_CHANNEL_ID)
+    eight_days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)
+
+    async for message in channel.history(after=eight_days_ago, limit=None):
+        for member in message.mentions:
+            if member.id in ALLOWED_OFFICER_IDS:
+                stats[member.name] = stats.get(member.name, 0) + 1
+
+    report = "\n".join([f"{name}: {count} عملية قبض" for name, count in stats.items()])
+    await interaction.followup.send(f"تقرير وحدة إلقاء القبض:\n{report}")
 
 bot.run(TOKEN)
