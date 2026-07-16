@@ -91,5 +91,12 @@ async def frind_check(ctx):
     report = "\n".join([f"{ctx.guild.get_member(uid).display_name}: {s['count']} رسالة، {round(s['hours'], 2)} ساعة" 
                         for uid, s in stats.items() if ctx.guild.get_member(uid)])
     await ctx.send(f"تقرير نشاط الفريند (آخر 14 يوم):\n{report}" if report else "لا يوجد نشاط مسجل.")
-
+@bot.command()
+async def sync(ctx):
+    if ctx.author.id == "1521418837378072656": # لتتأكد أنك أنت فقط من يستخدم الأمر
+        await bot.tree.sync()
+        await ctx.send("تمت مزامنة الأوامر بنجاح! يرجى الانتظار دقيقة.")
+    else:
+        await ctx.send("ليس لديك صلاحية استخدام هذا الأمر.")
+        
 bot.run(TOKEN)
