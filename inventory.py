@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 import os
 import datetime
@@ -9,70 +10,55 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-TOKEN = os.getenv('TOKEN')
+# IDs الخاصة بك كما طلبت
+CHANNELS = {
+    "frind": 1526667955616743514,
+    "officers": 1526668727657955418,
+    "arrests": 1526668730673664010
+}
 
-# الـ IDs الخاصة بك
-FRIND_CHANNEL_ID = 1526667955616743514
-FRIND_ROLE_ID = 1526667395484225669
-OFFICERS_CHANNEL_ID = 1526668727657955418
-OFFICERS_ROLE_ID = 1526667395484225670 
-ARREST_CHANNEL_ID = 1526668730673664010
-ARREST_ROLE_ID = 1526667395484225672
+ROLES = {
+    "frind": 1526667395484225669,
+    "officers": 1526667395484225670,
+    "arrests": 1526667395484225672
+}
 
-async def send_report(interaction, title, stats, total_days):
-    if not stats:
-        await interaction.edit_original_response(content=f"📊 **{title} (آخر {total_days} أيام):**\n\nلا يوجد نشاط مسجل.")
-        return
-
-    # ترتيب النتائج من الأكثر نشاطاً للأقل
-    sorted_stats = sorted(stats.items(), key=lambda x: x[1], reverse=True)
-    report_lines = [f"• {interaction.guild.get_member(uid).mention}: **{count}** رسالة" for uid, count in sorted_stats if interaction.guild.get_member(uid)]
-    
-    report_text = "\n".join(report_lines)
-    await interaction.edit_original_response(content=f"📊 **{title} (آخر {total_days} أيام):**\n\n{report_text}")
-
-@bot.tree.command(name="frind", description="جرد نشاط الفريند")
-async def frind_check(interaction: discord.Interaction):
-    await interaction.response.send_message("🔍 جاري جرد نشاط الفريند...")
-    channel = bot.get_channel(FRIND_CHANNEL_ID)
-    stats = {}
+async def get_audit_data(channel_id, role_id):
+    channel = bot.get_channel(channel_id)
     eight_days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)
+    stats = {}
     
     async for msg in channel.history(after=eight_days_ago, limit=None):
-        if any(role.id == FRIND_ROLE_ID for role in msg.author.roles):
+        if any(role.id == role_id for role in msg.author.roles):
             stats[msg.author.id] = stats.get(msg.author.id, 0) + 1
-    
-    await send_report(interaction, "تقرير نشاط الفريند", stats, 8)
-
-@bot.tree.command(name="check_officers", description="جرد الضباط في الروم المخصص")
-async def check_officers(interaction: discord.Interaction):
-    await interaction.response.send_message("🔍 جاري جرد نشاط الضباط...")
-    channel = bot.get_channel(OFFICERS_CHANNEL_ID)
-    stats = {}
-    eight_days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)
-    
-    async for msg in channel.history(after=eight_days_ago, limit=None):
-        if any(role.id == OFFICERS_ROLE_ID for role in msg.author.roles):
-            stats[msg.author.id] = stats.get(msg.author.id, 0) + 1
-            
-    await send_report(interaction, "تقرير نشاط الضباط", stats, 8)
-
-@bot.tree.command(name="check_arrests", description="جرد إلقاء القبض في الروم المخصص")
-async def check_arrests(interaction: discord.Interaction):
-    await interaction.response.send_message("🔍 جاري جرد عمليات القبض...")
-    channel = bot.get_channel(ARREST_CHANNEL_ID)
-    stats = {}
-    eight_days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)
-    
-    async for msg in channel.history(after=eight_days_ago, limit=None):
-        if any(role.id == ARREST_ROLE_ID for role in msg.author.roles):
-            stats[msg.author.id] = stats.get(msg.author.id, 0) + 1
-            
-    await send_report(interaction, "تقرير عمليات القبض", stats, 8)
+    return stats
 
 @bot.event
 async def on_ready():
-    await bot.tree.sync()
-    print(f"البوت جاهز: {bot.user}")
+    await bot.tree.sync() # مزامنة الأوامر تلقائياً عند التشغيل
+    print(f"البوت متصل: {bot.user}")
 
-bot.run(TOKEN)
+# الأوامر
+@bot.tree.command(name="frind", description="جرد نشاط الفريند")
+async def frind(interaction: discord.Interaction):
+    await interaction.response.send_message("جاري الجرد...")
+    stats = await get_audit_data(CHANNELS["frind"], ROLES["frind"])
+    # [هنا نضع التنسيق المرتب الذي اتفقنا عليه]
+    report = "\n".join([f"• {interaction.guild.get_member(uid).mention}: {count} رسالة" for uid, count in sorted(stats.items(), key=lambda x: x[1], reverse=True)])
+    await interaction.edit_original_response(content=f"📊 **نشاط الفريند:**\n{report}")
+
+@bot.tree.command(name="check_officers", description="جرد نشاط الضباط")
+async def check_officers(interaction: discord.Interaction):
+    await interaction.response.send_message("جاري جرد الضباط...")
+    stats = await get_audit_data(CHANNELS["officers"], ROLES["officers"])
+    report = "\n".join([f"• {interaction.guild.get_member(uid).mention}: {count} رسالة" for uid, count in sorted(stats.items(), key=lambda x: x[1], reverse=True)])
+    await interaction.edit_original_response(content=f"📊 **نشاط الضباط:**\n{report}")
+
+@bot.tree.command(name="check_arrests", description="جرد إلقاء القبض")
+async def check_arrests(interaction: discord.Interaction):
+    await interaction.response.send_message("جاري جرد إلقاء القبض...")
+    stats = await get_audit_data(CHANNELS["arrests"], ROLES["arrests"])
+    report = "\n".join([f"• {interaction.guild.get_member(uid).mention}: {count} رسالة" for uid, count in sorted(stats.items(), key=lambda x: x[1], reverse=True)])
+    await interaction.edit_original_response(content=f"📊 **نشاط إلقاء القبض:**\n{report}")
+
+bot.run(os.getenv('TOKEN'))
