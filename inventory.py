@@ -1,93 +1,67 @@
 import discord
-from discord import app_commands
 from discord.ext import commands
 import os
 import datetime
 from flask import Flask
 from threading import Thread
 
-# ==========================================
-# 1. خادم الويب الوهمي (لإسكات منصة Render مجاناً)
-# ==========================================
+# تشغيل الخادم لمنع توقف البوت على Render
 app = Flask(__name__)
-
 @app.route('/')
-def home():
-    return "Bot is alive!"
+def home(): return "Bot is alive!"
+def run_server(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+Thread(target=run_server, daemon=True).start()
 
-def run_server():
-    # هنا نجبر Flask على استخدام البورت الذي تبحث عنه Render
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
-def keep_alive():
-    t = Thread(target=run_server)
-    t.start()
-
-# ==========================================
-# 2. إعداد البوت
-# ==========================================
-intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
-
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-# الرومات والرولات
-CHANNELS = {
-    "frind": 1526667955616743514,
-    "officers": 1526668727657955418,
-    "arrests": 1526668730673664010
+# توزيعة القنوات والنقاط
+# الضباط: الرومات والقيمة
+OFFICER_CHANNELS = {
+    1526668339391365170: 2, 1526668345448075284: 2, 
+    1526668348262187188: 2, 1526668342444949696: 4 # الروم الأخير بـ 4 نقاط
 }
 
-ROLES = {
-    "frind": 1526667395484225669,
-    "officers": 1526667395484225670,
-    "arrests": 1526667395484225672
+# إلقاء القبض: الرومات والقيمة
+ARREST_CHANNELS = {
+    1526668398719926362: 6, # اعترافات
+    1526668402947653823: 8, # إعدامات
+    1526668405619560468: 5, # مداهمات
+    1526668409046171699: 4, # أدلة
+    1526668395406430308: 4  # قبض
 }
 
-async def get_audit_data(channel_id, role_id):
-    channel = bot.get_channel(channel_id)
-    if not channel: return {}
-    
+async def calculate_points(target_channels):
     eight_days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)
-    stats = {}
-    
-    async for msg in channel.history(after=eight_days_ago, limit=None):
-        if any(role.id == role_id for role in msg.author.roles):
-            stats[msg.author.id] = stats.get(msg.author.id, 0) + 1
+    points_board = {}
+
+    for channel_id, points_per_msg in target_channels.items():
+        channel = bot.get_channel(channel_id)
+        if not channel: continue
+        
+        async for msg in channel.history(after=eight_days_ago, limit=None):
+            if msg.author.bot: continue
+            points_board[msg.author.id] = points_board.get(msg.author.id, 0) + points_per_msg
             
-    return stats
+    return points_board
 
-@bot.event
-async def on_ready():
-    await bot.tree.sync()
-    print(f"تمت مزامنة الأوامر بنجاح! البوت متصل باسم: {bot.user}")
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def sync(ctx):
+    await bot.tree.sync(guild=ctx.guild)
+    await ctx.send("✅ تمت المزامنة! الأوامر الآن جاهزة.")
 
-@bot.tree.command(name="frind", description="جرد نشاط الفريند")
-async def frind(interaction: discord.Interaction):
-    await interaction.response.send_message("🔍 جاري جرد نشاط الفريند...")
-    stats = await get_audit_data(CHANNELS["frind"], ROLES["frind"])
-    
-    report = "\n".join([f"• {interaction.guild.get_member(uid).mention}: **{count}** رسالة" for uid, count in sorted(stats.items(), key=lambda x: x[1], reverse=True) if interaction.guild.get_member(uid)])
-    await interaction.edit_original_response(content=f"📊 **نشاط الفريند (آخر 8 أيام):**\n\n{report if report else 'لا يوجد نشاط مسجل.'}")
-
-@bot.tree.command(name="check_officers", description="جرد نشاط الضباط")
+@bot.tree.command(name="check_officers", description="جرد نقاط الضباط")
 async def check_officers(interaction: discord.Interaction):
-    await interaction.response.send_message("🔍 جاري جرد الضباط...")
-    stats = await get_audit_data(CHANNELS["officers"], ROLES["officers"])
-    
-    report = "\n".join([f"• {interaction.guild.get_member(uid).mention}: **{count}** رسالة" for uid, count in sorted(stats.items(), key=lambda x: x[1], reverse=True) if interaction.guild.get_member(uid)])
-    await interaction.edit_original_response(content=f"📊 **نشاط الضباط (آخر 8 أيام):**\n\n{report if report else 'لا يوجد نشاط مسجل.'}")
+    await interaction.response.send_message("🔍 جاري حساب نقاط الضباط...")
+    stats = await calculate_points(OFFICER_CHANNELS)
+    report = "\n".join([f"• {interaction.guild.get_member(uid).mention}: **{pts}** نقطة" for uid, pts in sorted(stats.items(), key=lambda x: x[1], reverse=True) if interaction.guild.get_member(uid)])
+    await interaction.edit_original_response(content=f"📊 **ترتيب نقاط الضباط (آخر 8 أيام):**\n\n{report}")
 
-@bot.tree.command(name="check_arrests", description="جرد إلقاء القبض")
+@bot.tree.command(name="check_arrests", description="جرد نقاط القبض")
 async def check_arrests(interaction: discord.Interaction):
-    await interaction.response.send_message("🔍 جاري جرد إلقاء القبض...")
-    stats = await get_audit_data(CHANNELS["arrests"], ROLES["arrests"])
-    
-    report = "\n".join([f"• {interaction.guild.get_member(uid).mention}: **{count}** رسالة" for uid, count in sorted(stats.items(), key=lambda x: x[1], reverse=True) if interaction.guild.get_member(uid)])
-    await interaction.edit_original_response(content=f"📊 **نشاط إلقاء القبض (آخر 8 أيام):**\n\n{report if report else 'لا يوجد نشاط مسجل.'}")
+    await interaction.response.send_message("🔍 جاري حساب نقاط إلقاء القبض...")
+    stats = await calculate_points(ARREST_CHANNELS)
+    report = "\n".join([f"• {interaction.guild.get_member(uid).mention}: **{pts}** نقطة" for uid, pts in sorted(stats.items(), key=lambda x: x[1], reverse=True) if interaction.guild.get_member(uid)])
+    await interaction.edit_original_response(content=f"📊 **ترتيب نقاط إلقاء القبض (آخر 8 أيام):**\n\n{report}")
 
-if __name__ == "__main__":
-    keep_alive() 
-    bot.run(os.getenv('TOKEN'))
+bot.run(os.getenv('TOKEN'))
