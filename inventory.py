@@ -25,14 +25,23 @@ async def on_ready():
     await bot.tree.sync()
     print(f"البوت جاهز ويعمل: {bot.user}")
 
-# أمر ID التقليدي
+# أمر ID للبحث بالاسم (النيكنيم)
 @bot.command()
-async def id(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    embed = discord.Embed(title=f"معلومات العضو: {member.name}", color=discord.Color.blue())
-    embed.add_field(name="الاسم", value=member.mention, inline=True)
-    embed.add_field(name="ID", value=member.id, inline=True)
-    await ctx.send(embed=embed)
+async def id(ctx, *, name: str):
+    member = None
+    for m in ctx.guild.members:
+        if name.lower() in m.display_name.lower():
+            member = m
+            break
+    
+    if member:
+        embed = discord.Embed(title=f"تم العثور على: {member.display_name}", color=discord.Color.green())
+        embed.add_field(name="الاسم الكامل", value=member.mention, inline=True)
+        embed.add_field(name="User ID", value=member.id, inline=True)
+        embed.add_field(name="للنسخ", value=f"`{member.id}`", inline=False)
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send(f"❌ لم أجد أحداً بهذا الاسم: {name}")
 
 # دالة التنسيق
 def format_report(title, stats, guild):
