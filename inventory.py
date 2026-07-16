@@ -7,16 +7,17 @@ from flask import Flask
 from threading import Thread
 
 # ==========================================
-# 1. إعداد خادم الويب الوهمي لحل مشكلة Render
+# 1. خادم الويب الوهمي (لإسكات منصة Render مجاناً)
 # ==========================================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "البوت يعمل بنجاح!"
+    return "Bot is alive!"
 
 def run_server():
-    port = int(os.environ.get("PORT", 8080))
+    # هنا نجبر Flask على استخدام البورت الذي تبحث عنه Render
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
 def keep_alive():
@@ -24,7 +25,7 @@ def keep_alive():
     t.start()
 
 # ==========================================
-# 2. إعداد البوت والأوامر
+# 2. إعداد البوت
 # ==========================================
 intents = discord.Intents.default()
 intents.members = True
@@ -32,7 +33,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# الرومات والرولات المخصصة لكل فئة حسب طلبك
+# الرومات والرولات
 CHANNELS = {
     "frind": 1526667955616743514,
     "officers": 1526668727657955418,
@@ -45,7 +46,6 @@ ROLES = {
     "arrests": 1526667395484225672
 }
 
-# دالة الجرد الموحدة (آخر 8 أيام)
 async def get_audit_data(channel_id, role_id):
     channel = bot.get_channel(channel_id)
     if not channel: return {}
@@ -88,9 +88,6 @@ async def check_arrests(interaction: discord.Interaction):
     report = "\n".join([f"• {interaction.guild.get_member(uid).mention}: **{count}** رسالة" for uid, count in sorted(stats.items(), key=lambda x: x[1], reverse=True) if interaction.guild.get_member(uid)])
     await interaction.edit_original_response(content=f"📊 **نشاط إلقاء القبض (آخر 8 أيام):**\n\n{report if report else 'لا يوجد نشاط مسجل.'}")
 
-# ==========================================
-# 3. تشغيل البوت والخادم
-# ==========================================
 if __name__ == "__main__":
-    keep_alive() # تشغيل الخادم الوهمي لمنع Render من إغلاق البوت
+    keep_alive() 
     bot.run(os.getenv('TOKEN'))
