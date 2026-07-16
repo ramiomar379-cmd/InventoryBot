@@ -5,7 +5,6 @@ import datetime
 from flask import Flask
 from threading import Thread
 
-# تشغيل الخادم لمنع توقف البوت على Render
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Bot is alive!"
@@ -14,54 +13,50 @@ Thread(target=run_server, daemon=True).start()
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
-# توزيعة القنوات والنقاط
-# الضباط: الرومات والقيمة
-OFFICER_CHANNELS = {
-    1526668339391365170: 2, 1526668345448075284: 2, 
-    1526668348262187188: 2, 1526668342444949696: 4 # الروم الأخير بـ 4 نقاط
-}
+# الإعدادات (نفس القنوات التي حددتها)
+OFFICER_CHANNELS = {1526668339391365170: 2, 1526668345448075284: 2, 1526668348262187188: 2, 1526668342444949696: 4}
+ARREST_CHANNELS = {1526668398719926362: 6, 1526668402947653823: 8, 1526668405619560468: 5, 1526668409046171699: 4, 1526668395406430308: 4}
 
-# إلقاء القبض: الرومات والقيمة
-ARREST_CHANNELS = {
-    1526668398719926362: 6, # اعترافات
-    1526668402947653823: 8, # إعدامات
-    1526668405619560468: 5, # مداهمات
-    1526668409046171699: 4, # أدلة
-    1526668395406430308: 4  # قبض
-}
-
-async def calculate_points(target_channels):
-    eight_days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)
-    points_board = {}
-
-    for channel_id, points_per_msg in target_channels.items():
-        channel = bot.get_channel(channel_id)
-        if not channel: continue
-        
-        async for msg in channel.history(after=eight_days_ago, limit=None):
-            if msg.author.bot: continue
-            points_board[msg.author.id] = points_board.get(msg.author.id, 0) + points_per_msg
-            
-    return points_board
+@bot.event
+async def on_ready(): print(f"البوت جاهز: {bot.user}")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def sync(ctx):
     await bot.tree.sync(guild=ctx.guild)
-    await ctx.send("✅ تمت المزامنة! الأوامر الآن جاهزة.")
+    await ctx.send("✅ تم تحديث الأوامر.")
 
-@bot.tree.command(name="check_officers", description="جرد نقاط الضباط")
+# دالة تنسيق التقرير المرتب
+def format_report(title, stats, guild):
+    if not stats: return f"📊 **{title}**\n\nلا يوجد نشاط مسجل."
+    sorted_data = sorted(stats.items(), key=lambda x: x[1], reverse=True)
+    lines = [f"• {guild.get_member(uid).mention if guild.get_member(uid) else f'ID:{uid}'} | **{pts} نقطة**" for uid, pts in sorted_data]
+    return f"📊 **{title} (آخر 8 أيام):**\n\n" + "\n".join(lines)
+
+@bot.tree.command(name="check_officers", description="جرد الضباط")
 async def check_officers(interaction: discord.Interaction):
-    await interaction.response.send_message("🔍 جاري حساب نقاط الضباط...")
-    stats = await calculate_points(OFFICER_CHANNELS)
-    report = "\n".join([f"• {interaction.guild.get_member(uid).mention}: **{pts}** نقطة" for uid, pts in sorted(stats.items(), key=lambda x: x[1], reverse=True) if interaction.guild.get_member(uid)])
-    await interaction.edit_original_response(content=f"📊 **ترتيب نقاط الضباط (آخر 8 أيام):**\n\n{report}")
+    await interaction.response.send_message("جاري الجرد...")
+    eight_days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)
+    stats = {}
+    for cid, pts in OFFICER_CHANNELS.items():
+        channel = bot.get_channel(cid)
+        if channel:
+            async for msg in channel.history(after=eight_days_ago, limit=None):
+                if msg.attachments: # شرط وجود صورة
+                    stats[msg.author.id] = stats.get(msg.author.id, 0) + pts
+    await interaction.edit_original_response(content=format_report("ترتيب الضباط (حسب الصور)", stats, interaction.guild))
 
-@bot.tree.command(name="check_arrests", description="جرد نقاط القبض")
+@bot.tree.command(name="check_arrests", description="جرد القبض")
 async def check_arrests(interaction: discord.Interaction):
-    await interaction.response.send_message("🔍 جاري حساب نقاط إلقاء القبض...")
-    stats = await calculate_points(ARREST_CHANNELS)
-    report = "\n".join([f"• {interaction.guild.get_member(uid).mention}: **{pts}** نقطة" for uid, pts in sorted(stats.items(), key=lambda x: x[1], reverse=True) if interaction.guild.get_member(uid)])
-    await interaction.edit_original_response(content=f"📊 **ترتيب نقاط إلقاء القبض (آخر 8 أيام):**\n\n{report}")
+    await interaction.response.send_message("جاري الجرد...")
+    eight_days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)
+    stats = {}
+    for cid, pts in ARREST_CHANNELS.items():
+        channel = bot.get_channel(cid)
+        if channel:
+            async for msg in channel.history(after=eight_days_ago, limit=None):
+                if msg.mentions: # شرط وجود منشن
+                    stats[msg.author.id] = stats.get(msg.author.id, 0) + pts
+    await interaction.edit_original_response(content=format_report("ترتيب القبض (حسب المنشن)", stats, interaction.guild))
 
 bot.run(os.getenv('TOKEN'))
