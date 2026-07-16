@@ -1,11 +1,12 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import os
 import datetime
+import requests
 from flask import Flask
 from threading import Thread
 
-# 1. إعداد خادم الويب (لإبقاء البوت يعمل على Render)
+# 1. إعداد خادم الويب (للعمل على Render)
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Bot is alive!"
@@ -20,12 +21,21 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 OFFICER_CHANNELS = {1526668339391365170: 2, 1526668345448075284: 2, 1526668348262187188: 2, 1526668342444949696: 4}
 ARREST_CHANNELS = {1526668398719926362: 6, 1526668402947653823: 8, 1526668405619560468: 5, 1526668409046171699: 4, 1526668395406430308: 4}
 
+# مهمة البقاء نشطاً (نكز الموقع كل دقيقة)
+@tasks.loop(minutes=1)
+async def keep_alive_task():
+    try:
+        requests.get("https://my-inventory-bot.onrender.com")
+    except:
+        pass
+
 @bot.event
 async def on_ready():
     await bot.tree.sync()
+    keep_alive_task.start()
     print(f"البوت جاهز ويعمل: {bot.user}")
 
-# أمر ID للبحث بالاسم (النيكنيم)
+# أمر ID للبحث بالاسم
 @bot.command()
 async def id(ctx, *, name: str):
     member = None
@@ -50,7 +60,7 @@ def format_report(title, stats, guild):
     lines = [f"• {guild.get_member(uid).mention if guild.get_member(uid) else f'ID:{uid}'} | **{pts} نقطة**" for uid, pts in sorted_data]
     return f"📊 **{title} (آخر 8 أيام):**\n\n" + "\n".join(lines)
 
-# أمر الجرد (الضباط - صور)
+# أمر الجرد (الضباط)
 @bot.tree.command(name="check_officers", description="جرد نقاط الضباط")
 async def check_officers(interaction: discord.Interaction):
     await interaction.response.send_message("جاري الجرد...")
@@ -64,7 +74,7 @@ async def check_officers(interaction: discord.Interaction):
                     stats[msg.author.id] = stats.get(msg.author.id, 0) + pts
     await interaction.edit_original_response(content=format_report("ترتيب الضباط (حسب الصور)", stats, interaction.guild))
 
-# أمر الجرد (القبض - منشن)
+# أمر الجرد (القبض)
 @bot.tree.command(name="check_arrests", description="جرد نقاط القبض")
 async def check_arrests(interaction: discord.Interaction):
     await interaction.response.send_message("جاري الجرد...")
