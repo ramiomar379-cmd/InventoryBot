@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
@@ -6,7 +7,7 @@ import datetime
 from flask import Flask
 from threading import Thread
 
-# تشغيل الويب
+# تشغيل الويب لـ Render
 app = Flask(__name__)
 @app.route('/')
 def home():
@@ -17,43 +18,37 @@ def run_web():
 
 Thread(target=run_web).start()
 
+# إعدادات البوت
 load_dotenv()
 TOKEN = os.getenv('TOKEN')
+ADMIN_ROLE_ID = int(os.getenv('ADMIN_ROLE_ID'))
 
 intents = discord.Intents.default()
-intents.messages = True
 intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- إعداداتك ---
-ID_COMMAND_CHANNEL = 1526667964038910093
-FRIEND_ROLE_ID = 1526667395484225669
-FRIEND_CHANNEL_ID = 1526667955616743514
-# هنا تضع الأيدي الخاص بالرول الذي تريد أن يملك صلاحية !sync
-ADMIN_ROLE_ID = 123456789012345678 # <--- ضع أيدي الرول هنا
-
 @bot.event
 async def on_ready():
     print(f'البوت جاهز ✅ {bot.user}')
 
-# --- أمر البحث بالنيك نيم ---
+# 1. أمر البحث بالنيك نيم (يستخدم !id)
 @bot.command(name="id")
 async def id_command(ctx, *, name: str):
-    if ctx.channel.id != ID_COMMAND_CHANNEL: return
-    
-    # البحث بالاسم المستعار (Nickname) أو الاسم العادي
     member = discord.utils.find(lambda m: name.lower() in m.display_name.lower(), ctx.guild.members)
-    
     if member:
         await ctx.send(f"الشخص المقصود هو: {member.mention} (ID: {member.id})")
     else:
         await ctx.send("عذراً، لم أجد شخصاً بهذا الاسم.")
 
-# --- أمر الجرد ---
+# 2. أمر الجرد (يستخدم !frind)
 @bot.command(name="frind")
 async def frind_check(ctx):
+    # ملاحظة: تأكد من وضع الآيدي الصحيح للقناة هنا
+    FRIEND_CHANNEL_ID = 1526667955616743514 
+    FRIEND_ROLE_ID = 1526667395484225669
+    
     channel = bot.get_channel(FRIEND_CHANNEL_ID)
     if not channel: return
     
@@ -76,15 +71,20 @@ async def frind_check(ctx):
                         for uid, s in stats.items() if ctx.guild.get_member(uid)])
     await ctx.send(f"تقرير نشاط الفريند:\n{report}" if report else "لا يوجد نشاط.")
 
-# --- أمر المزامنة بالرول ---
+# 3. أمر المزامنة (يستخدم !sync)
 @bot.command()
 async def sync(ctx):
-    # التحقق من وجود الرول عند المستخدم
+    # التحقق من الرول
     role = discord.utils.get(ctx.author.roles, id=ADMIN_ROLE_ID)
     if role:
         await bot.tree.sync()
         await ctx.send("تمت مزامنة الأوامر بنجاح! ✅")
     else:
         await ctx.send("ليس لديك الرول المطلوب لاستخدام هذا الأمر.")
-        
+
+# 4. مثال لأمر يظهر في قائمة الـ /
+@bot.tree.command(name="ping", description="قياس سرعة استجابة البوت")
+async def ping(interaction: discord.Interaction):
+    await interaction.response.send_message(f"البوت يعمل! السرعة: {round(bot.latency * 1000)}ms")
+
 bot.run(TOKEN)
