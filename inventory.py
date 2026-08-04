@@ -258,4 +258,8 @@ async def count(
     report_title = f"رسائل قناة #{interaction.channel.name} ({start_day}/{start_month}/{start_year} - {end_day}/{end_month}/{end_year})"
     await interaction.edit_original_response(content=format_report(report_title, stats, interaction.guild, "رسالة"))
 
-bot.run(os.getenv('MTUyNzA2MTY1MjM0MjcwMjA4MA.GjlfXT.nFAyQnkI--83-x_JmQS6N1C8UnGbCUshkpx-7E'))
+
+
+# تفعيل البوت بأستخدام التوكن ليتحضن  الريندر
+
+bot.run(os.getenv('TOKEN'))
