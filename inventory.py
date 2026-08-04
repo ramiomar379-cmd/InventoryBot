@@ -24,12 +24,13 @@ Thread(target=run_server, daemon=True).start()
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ==================== الإعدادات ====================
-# ضَع هنا أرقام المعرفات (IDs) للرتب المسموح لها بإستخدام أمر mentions و count
+# ---------------------------------- صلاحيات كاونت ومنشن ------------------------------
+# ضع أرقام (IDs) الرتب المسموح لها باستعمال الأوامر هنا، يفصل بينها فاصلة (,)
 ALLOWED_ROLE_IDS = [
-    1527238059303899146,  # استبدل هذا الرقم بـ ID الرتبة الأولى
-    1527238059303899146,   # استبدل هذا الرقم بـ ID الرتبة الثانية (يمكنك إضافة المزيد)
+    123456789012345678,  # ID الرتبة الأولى
+    987654321098765432,  # ID الرتبة الثانية (أضف المزيد بنفس الطريقة)
 ]
+# -------------------------------------------------------------------------------------
 
 OFFICER_CHANNELS = {
     1526668339391365170: 2,
@@ -45,7 +46,6 @@ ARREST_CHANNELS = {
     1526668409046171699: 4,
     1526668395406430308: 4
 }
-# ====================================================
 
 # دالة للتحقق من امتلاك المستخدم لرتبة مسموح بها
 def has_allowed_role(interaction: discord.Interaction) -> bool:
@@ -131,7 +131,7 @@ async def check_arrests(interaction: discord.Interaction):
                     
     await interaction.edit_original_response(content=format_report("ترتيب القبض (حسب المنشن)", stats, interaction.guild, "نقطة"))
 
-# أمر /mentions الجديد
+# أمر /mentions
 @bot.tree.command(name="mentions", description="حساب عدد المنشنات المرسلة من كل شخص في هذه القناة خلال مدة محددة")
 @app_commands.describe(days="عدد الأيام المراد جرد المنشنات خلالها")
 async def mentions(interaction: discord.Interaction, days: int):
@@ -150,7 +150,7 @@ async def mentions(interaction: discord.Interaction, days: int):
     report_title = f"إحصائيات المنشنات في قناة #{interaction.channel.name} (آخر {days} يوم)"
     await interaction.edit_original_response(content=format_report(report_title, stats, interaction.guild, "منشن"))
 
-# أمر /count الجديد
+# أمر /count
 @bot.tree.command(name="count", description="حساب عدد الرسائل لكل شخص في هذه القناة خلال مدة محددة")
 @app_commands.describe(days="عدد الأيام المراد جرد الرسائل خلالها")
 async def count(interaction: discord.Interaction, days: int):
