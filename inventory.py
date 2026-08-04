@@ -25,7 +25,6 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------------------------- صلاحيات كاونت ومنشن ------------------------------
-# ضع أرقام (IDs) الرتب المسموح لها باستعمال الأوامر هنا، يفصل بينها فاصلة (,)
 ALLOWED_ROLE_IDS = [
     123456789012345678,  # ID الرتبة الأولى
     987654321098765432,  # ID الرتبة الثانية
@@ -36,12 +35,9 @@ ALLOWED_ROLE_IDS = [
 MAIN_GUILD_ID = 1441066070461911193       # ID السيرفر الأساسي
 SECONDARY_GUILD_ID = 1526667305017413643  # ID سيرفر النيابة
 
-# خريطة الرتب: [ID الرتبة في الأساسي : ID الرتبة في النيابة]
 ROLE_MAPPING = {
     1441072532219498629: 1526667652431347772,
     1441072529111519353: 1526667549956116642,
-    # يمكنك إضافة رتب إضافية هنا بنفس النمط:
-    # ID_الأساسي: ID_النيابة,
 }
 # -------------------------------------------------------------------------------------
 
@@ -60,16 +56,13 @@ ARREST_CHANNELS = {
     1526668395406430308: 4
 }
 
-# دالة للتحقق من الصلاحيات
 def has_allowed_role(interaction: discord.Interaction) -> bool:
     if not ALLOWED_ROLE_IDS:
         return True
     user_role_ids = [role.id for role in interaction.user.roles]
     return any(role_id in user_role_ids for role_id in ALLOWED_ROLE_IDS)
 
-# دالة المزامنة بين السيرفرين (تغيير الاسم والرتب)
 async def sync_user_data(main_member: discord.Member, sec_member: discord.Member):
-    # 1. مزامنة الاسم
     try:
         target_nick = main_member.display_name
         if sec_member.display_name != target_nick:
@@ -77,7 +70,6 @@ async def sync_user_data(main_member: discord.Member, sec_member: discord.Member
     except Exception as e:
         print(f"❌ تعذر تغيير اسم العضو {sec_member}: {e}")
 
-    # 2. مزامنة الرتب
     try:
         main_role_ids = [r.id for r in main_member.roles]
         roles_to_add = []
@@ -102,7 +94,6 @@ async def sync_user_data(main_member: discord.Member, sec_member: discord.Member
     except Exception as e:
         print(f"❌ تعذر تحديث رتب العضو {sec_member}: {e}")
 
-# أحداث المزامنة التلقائية
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
     if after.guild.id != MAIN_GUILD_ID:
@@ -125,11 +116,10 @@ async def on_member_join(member: discord.Member):
             if main_member:
                 await sync_user_data(main_member, member)
 
-# مهمة البقاء نشطاً
 @tasks.loop(minutes=1)
 async def keep_alive_task():
     try:
-        requests.get("https://my-inventory-bot.onrender.com", timeout=5)
+        requests.get("https://al3dl-bot-test.onrender.com", timeout=5)
     except Exception:
         pass
 
@@ -139,7 +129,6 @@ async def on_ready():
     keep_alive_task.start()
     print(f"✅ تم تشغيل البوت بنجاح: {bot.user}")
 
-# أمر ID للبحث بالاسم
 @bot.command()
 async def id(ctx, *, name: str):
     member = None
@@ -156,7 +145,6 @@ async def id(ctx, *, name: str):
     else:
         await ctx.send(f"❌ لم يتم العثور على أي شخص باسم: `{name}`")
 
-# دالة تنسيق التقارير
 def format_report(title, stats, guild, unit_name="نقطة"):
     if not stats:
         return f"📊 **{title}**\n\nلا يوجد نشاط مسجل في هذه الفترة."
@@ -170,7 +158,6 @@ def format_report(title, stats, guild, unit_name="نقطة"):
         
     return f"📊 **{title}**\n\n" + "\n".join(lines)
 
-# أمر الجرد (الضباط)
 @bot.tree.command(name="check_officers", description="جرد نقاط الضباط")
 async def check_officers(interaction: discord.Interaction):
     await interaction.response.send_message("⏳ جاري جرد نقاط الضباط...")
@@ -186,7 +173,6 @@ async def check_officers(interaction: discord.Interaction):
                     
     await interaction.edit_original_response(content=format_report("ترتيب الضباط (حسب الصور)", stats, interaction.guild, "نقطة"))
 
-# أمر الجرد (القبض)
 @bot.tree.command(name="check_arrests", description="جرد نقاط القبض")
 async def check_arrests(interaction: discord.Interaction):
     await interaction.response.send_message("⏳ جاري جرد نقاط القبض...")
@@ -202,7 +188,6 @@ async def check_arrests(interaction: discord.Interaction):
                     
     await interaction.edit_original_response(content=format_report("ترتيب القبض (حسب المنشن)", stats, interaction.guild, "نقطة"))
 
-# أمر /mentions المعدل بالتاريخ
 @bot.tree.command(name="mentions", description="حساب عدد المنشنات المرسلة في فترة محددة")
 @app_commands.describe(
     start_year="سنة بداية الجرد (مثال: 2026)",
@@ -238,7 +223,6 @@ async def mentions(
     report_title = f"منشنات قناة #{interaction.channel.name} ({start_day}/{start_month}/{start_year} - {end_day}/{end_month}/{end_year})"
     await interaction.edit_original_response(content=format_report(report_title, stats, interaction.guild, "منشن"))
 
-# أمر /count المعدل بالتاريخ
 @bot.tree.command(name="count", description="حساب عدد الرسائل لكل شخص في فترة محددة")
 @app_commands.describe(
     start_year="سنة بداية الجرد (مثال: 2026)",
