@@ -28,8 +28,21 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ضع أرقام (IDs) الرتب المسموح لها باستعمال الأوامر هنا، يفصل بينها فاصلة (,)
 ALLOWED_ROLE_IDS = [
     123456789012345678,  # ID الرتبة الأولى
-    987654321098765432,  # ID الرتبة الثانية (أضف المزيد بنفس الطريقة)
+    987654321098765432,  # ID الرتبة الثانية
 ]
+# -------------------------------------------------------------------------------------
+
+# ---------------------------------- إعدادات المزامنة ----------------------------------
+MAIN_GUILD_ID = 1441066070461911193       # ID السيرفر الأساسي
+SECONDARY_GUILD_ID = 1526667305017413643  # ID سيرفر النيابة
+
+# خريطة الرتب: [ID الرتبة في الأساسي : ID الرتبة في النيابة]
+ROLE_MAPPING = {
+    1441072532219498629: 1526667652431347772,
+    1441072529111519353: 1526667549956116642,
+    # يمكنك إضافة رتب إضافية هنا بنفس النمط:
+    # ID_الأساسي: ID_النيابة,
+}
 # -------------------------------------------------------------------------------------
 
 OFFICER_CHANNELS = {
@@ -47,14 +60,72 @@ ARREST_CHANNELS = {
     1526668395406430308: 4
 }
 
-# دالة للتحقق من امتلاك المستخدم لرتبة مسموح بها
+# دالة للتحقق من الصلاحيات
 def has_allowed_role(interaction: discord.Interaction) -> bool:
     if not ALLOWED_ROLE_IDS:
         return True
     user_role_ids = [role.id for role in interaction.user.roles]
     return any(role_id in user_role_ids for role_id in ALLOWED_ROLE_IDS)
 
-# مهمة البقاء نشطاً (نكز الموقع كل دقيقة)
+# دالة المزامنة بين السيرفرين (تغيير الاسم والرتب)
+async def sync_user_data(main_member: discord.Member, sec_member: discord.Member):
+    # 1. مزامنة الاسم
+    try:
+        target_nick = main_member.display_name
+        if sec_member.display_name != target_nick:
+            await sec_member.edit(nick=target_nick)
+    except Exception as e:
+        print(f"❌ تعذر تغيير اسم العضو {sec_member}: {e}")
+
+    # 2. مزامنة الرتب
+    try:
+        main_role_ids = [r.id for r in main_member.roles]
+        roles_to_add = []
+        roles_to_remove = []
+
+        for main_role_id, sec_role_id in ROLE_MAPPING.items():
+            sec_role = sec_member.guild.get_role(sec_role_id)
+            if not sec_role:
+                continue
+
+            if main_role_id in main_role_ids:
+                if sec_role not in sec_member.roles:
+                    roles_to_add.append(sec_role)
+            else:
+                if sec_role in sec_member.roles:
+                    roles_to_remove.append(sec_role)
+
+        if roles_to_add:
+            await sec_member.add_roles(*roles_to_add)
+        if roles_to_remove:
+            await sec_member.remove_roles(*roles_to_remove)
+    except Exception as e:
+        print(f"❌ تعذر تحديث رتب العضو {sec_member}: {e}")
+
+# أحداث المزامنة التلقائية
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    if after.guild.id != MAIN_GUILD_ID:
+        return
+
+    sec_guild = bot.get_guild(SECONDARY_GUILD_ID)
+    if not sec_guild:
+        return
+
+    sec_member = sec_guild.get_member(after.id)
+    if sec_member:
+        await sync_user_data(after, sec_member)
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    if member.guild.id == SECONDARY_GUILD_ID:
+        main_guild = bot.get_guild(MAIN_GUILD_ID)
+        if main_guild:
+            main_member = main_guild.get_member(member.id)
+            if main_member:
+                await sync_user_data(main_member, member)
+
+# مهمة البقاء نشطاً
 @tasks.loop(minutes=1)
 async def keep_alive_task():
     try:
@@ -131,42 +202,76 @@ async def check_arrests(interaction: discord.Interaction):
                     
     await interaction.edit_original_response(content=format_report("ترتيب القبض (حسب المنشن)", stats, interaction.guild, "نقطة"))
 
-# أمر /mentions
-@bot.tree.command(name="mentions", description="حساب عدد المنشنات المرسلة من كل شخص في هذه القناة خلال مدة محددة")
-@app_commands.describe(days="عدد الأيام المراد جرد المنشنات خلالها")
-async def mentions(interaction: discord.Interaction, days: int):
+# أمر /mentions المعدل بالتاريخ
+@bot.tree.command(name="mentions", description="حساب عدد المنشنات المرسلة في فترة محددة")
+@app_commands.describe(
+    start_year="سنة بداية الجرد (مثال: 2026)",
+    start_month="شهر بداية الجرد (1-12)",
+    start_day="يوم بداية الجرد (1-31)",
+    end_year="سنة نهاية الجرد (مثال: 2026)",
+    end_month="شهر نهاية الجرد (1-12)",
+    end_day="يوم نهاية الجرد (1-31)"
+)
+async def mentions(
+    interaction: discord.Interaction,
+    start_year: int, start_month: int, start_day: int,
+    end_year: int, end_month: int, end_day: int
+):
     if not has_allowed_role(interaction):
         await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
         return
 
-    await interaction.response.send_message(f"⏳ جاري حساب المنشنات في هذه القناة لآخر {days} يوم/أيام...")
-    start_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+    try:
+        start_date = datetime.datetime(start_year, start_month, start_day, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        end_date = datetime.datetime(end_year, end_month, end_day, 23, 59, 59, tzinfo=datetime.timezone.utc)
+    except ValueError:
+        await interaction.response.send_message("❌ التاريخ الذي أدخلته غير صحيح!", ephemeral=True)
+        return
+
+    await interaction.response.send_message(f"⏳ جاري حساب المنشنات من `{start_day}/{start_month}/{start_year}` إلى `{end_day}/{end_month}/{end_year}`...")
     stats = {}
 
-    async for msg in interaction.channel.history(after=start_date, limit=None):
+    async for msg in interaction.channel.history(after=start_date, before=end_date, limit=None):
         if msg.mentions and not msg.author.bot:
             stats[msg.author.id] = stats.get(msg.author.id, 0) + len(msg.mentions)
 
-    report_title = f"إحصائيات المنشنات في قناة #{interaction.channel.name} (آخر {days} يوم)"
+    report_title = f"منشنات قناة #{interaction.channel.name} ({start_day}/{start_month}/{start_year} - {end_day}/{end_month}/{end_year})"
     await interaction.edit_original_response(content=format_report(report_title, stats, interaction.guild, "منشن"))
 
-# أمر /count
-@bot.tree.command(name="count", description="حساب عدد الرسائل لكل شخص في هذه القناة خلال مدة محددة")
-@app_commands.describe(days="عدد الأيام المراد جرد الرسائل خلالها")
-async def count(interaction: discord.Interaction, days: int):
+# أمر /count المعدل بالتاريخ
+@bot.tree.command(name="count", description="حساب عدد الرسائل لكل شخص في فترة محددة")
+@app_commands.describe(
+    start_year="سنة بداية الجرد (مثال: 2026)",
+    start_month="شهر بداية الجرد (1-12)",
+    start_day="يوم بداية الجرد (1-31)",
+    end_year="سنة نهاية الجرد (مثال: 2026)",
+    end_month="شهر نهاية الجرد (1-12)",
+    end_day="يوم نهاية الجرد (1-31)"
+)
+async def count(
+    interaction: discord.Interaction,
+    start_year: int, start_month: int, start_day: int,
+    end_year: int, end_month: int, end_day: int
+):
     if not has_allowed_role(interaction):
         await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
         return
 
-    await interaction.response.send_message(f"⏳ جاري حساب عدد الرسائل في هذه القناة لآخر {days} يوم/أيام...")
-    start_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+    try:
+        start_date = datetime.datetime(start_year, start_month, start_day, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        end_date = datetime.datetime(end_year, end_month, end_day, 23, 59, 59, tzinfo=datetime.timezone.utc)
+    except ValueError:
+        await interaction.response.send_message("❌ التاريخ الذي أدخلته غير صحيح!", ephemeral=True)
+        return
+
+    await interaction.response.send_message(f"⏳ جاري حساب الرسائل من `{start_day}/{start_month}/{start_year}` إلى `{end_day}/{end_month}/{end_year}`...")
     stats = {}
 
-    async for msg in interaction.channel.history(after=start_date, limit=None):
+    async for msg in interaction.channel.history(after=start_date, before=end_date, limit=None):
         if not msg.author.bot:
             stats[msg.author.id] = stats.get(msg.author.id, 0) + 1
 
-    report_title = f"إحصائيات الرسائل في قناة #{interaction.channel.name} (آخر {days} يوم)"
+    report_title = f"رسائل قناة #{interaction.channel.name} ({start_day}/{start_month}/{start_year} - {end_day}/{end_month}/{end_year})"
     await interaction.edit_original_response(content=format_report(report_title, stats, interaction.guild, "رسالة"))
 
-bot.run(os.getenv('TOKEN'))
+bot.run(os.getenv('MTUyNzA2MTY1MjM0MjcwMjA4MA.GjlfXT.nFAyQnkI--83-x_JmQS6N1C8UnGbCUshkpx-7E'))
