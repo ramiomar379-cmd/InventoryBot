@@ -24,10 +24,28 @@ Thread(target=run_server, daemon=True).start()
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ---------------------------------- صلاحيات كاونت ومنشن ------------------------------
-ALLOWED_ROLE_IDS = [
-    1526667402325131414,  # ID الرتبة الأولى
-    1526667402325131414,  # ID الرتبة الثانية
+# ---------------------------------- القنوات والرتب المحددة ------------------------------
+# الرتبة الوحيدة المسموح لها بأوامر count و mentions
+MENTIONS_COUNT_ALLOWED_ROLE = 1526667402325131414
+
+# جرد الضباط
+OFFICERS_AUDIT_CHANNEL_ID = 1526668727657955418
+OFFICERS_ALLOWED_ROLES = [
+    1526667489147355146,
+    1526667490287947776,
+    1526667491353301093,
+    1526667492590620865,
+    1526667402325131414
+]
+
+# جرد الوحدة (القبض)
+UNIT_AUDIT_CHANNEL_ID = 1526668730673664010
+UNIT_ALLOWED_ROLES = [
+    1526667440426188890,
+    1526667441395208305,
+    1526667402325131414,
+    1526667535431504064,
+    1526667536542863400
 ]
 # -------------------------------------------------------------------------------------
 
@@ -56,11 +74,15 @@ ARREST_CHANNELS = {
     1526668395406430308: 4
 }
 
-def has_allowed_role(interaction: discord.Interaction) -> bool:
-    if not ALLOWED_ROLE_IDS:
-        return True
+def has_role(interaction: discord.Interaction, allowed_roles: list) -> bool:
+    """فحص امتلاك العضو لأي من الرتب المسموحة"""
     user_role_ids = [role.id for role in interaction.user.roles]
-    return any(role_id in user_role_ids for role_id in ALLOWED_ROLE_IDS)
+    return any(role_id in user_role_ids for role_id in allowed_roles)
+
+def has_single_role(interaction: discord.Interaction, role_id: int) -> bool:
+    """فحص امتلاك العضو لرتبة واحدة معينة"""
+    user_role_ids = [role.id for role in interaction.user.roles]
+    return role_id in user_role_ids
 
 async def sync_user_data(main_member: discord.Member, sec_member: discord.Member):
     try:
@@ -129,6 +151,7 @@ async def on_ready():
     keep_alive_task.start()
     print(f"✅ تم تشغيل البوت بنجاح: {bot.user}")
 
+# أمر !id - متاح للجميع دون تقييد
 @bot.command()
 async def id(ctx, *, name: str):
     member = None
@@ -158,9 +181,18 @@ def format_report(title, stats, guild, unit_name="نقطة"):
         
     return f"📊 **{title}**\n\n" + "\n".join(lines)
 
+# ---------------- أمر جرد الضباط ----------------
 @bot.tree.command(name="check_officers", description="جرد نقاط الضباط")
 async def check_officers(interaction: discord.Interaction):
-    await interaction.response.send_message("⏳ جاري جرد نقاط الضباط...")
+    if not has_role(interaction, OFFICERS_ALLOWED_ROLES):
+        await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
+        return
+
+    if interaction.channel_id != OFFICERS_AUDIT_CHANNEL_ID:
+        await interaction.response.send_message(f"❌ يمكنك استخدام هذا الأمر فقط داخل الروم المخصصة: <#{OFFICERS_AUDIT_CHANNEL_ID}>", ephemeral=True)
+        return
+
+    await interaction.response.send_message("⏳ جاري جرد نقاط الضباط...", ephemeral=True)
     eight_days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)
     stats = {}
     
@@ -173,9 +205,18 @@ async def check_officers(interaction: discord.Interaction):
                     
     await interaction.edit_original_response(content=format_report("ترتيب الضباط (حسب الصور)", stats, interaction.guild, "نقطة"))
 
+# ---------------- أمر جرد الوحدة (القبض) ----------------
 @bot.tree.command(name="check_arrests", description="جرد نقاط القبض")
 async def check_arrests(interaction: discord.Interaction):
-    await interaction.response.send_message("⏳ جاري جرد نقاط القبض...")
+    if not has_role(interaction, UNIT_ALLOWED_ROLES):
+        await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
+        return
+
+    if interaction.channel_id != UNIT_AUDIT_CHANNEL_ID:
+        await interaction.response.send_message(f"❌ يمكنك استخدام هذا الأمر فقط داخل الروم المخصصة: <#{UNIT_AUDIT_CHANNEL_ID}>", ephemeral=True)
+        return
+
+    await interaction.response.send_message("⏳ جاري جرد نقاط القبض...", ephemeral=True)
     eight_days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)
     stats = {}
     
@@ -188,6 +229,7 @@ async def check_arrests(interaction: discord.Interaction):
                     
     await interaction.edit_original_response(content=format_report("ترتيب القبض (حسب المنشن)", stats, interaction.guild, "نقطة"))
 
+# ---------------- أمر المنشن (محصور بالرتبة المحددة ويظهر بشكل خاص) ----------------
 @bot.tree.command(name="mentions", description="حساب عدد المنشنات المرسلة في فترة محددة")
 @app_commands.describe(
     start_year="سنة بداية الجرد (مثال: 2026)",
@@ -202,7 +244,7 @@ async def mentions(
     start_year: int, start_month: int, start_day: int,
     end_year: int, end_month: int, end_day: int
 ):
-    if not has_allowed_role(interaction):
+    if not has_single_role(interaction, MENTIONS_COUNT_ALLOWED_ROLE):
         await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
         return
 
@@ -213,7 +255,7 @@ async def mentions(
         await interaction.response.send_message("❌ التاريخ الذي أدخلته غير صحيح!", ephemeral=True)
         return
 
-    await interaction.response.send_message(f"⏳ جاري حساب المنشنات من `{start_day}/{start_month}/{start_year}` إلى `{end_day}/{end_month}/{end_year}`...")
+    await interaction.response.send_message(f"⏳ جاري حساب المنشنات من `{start_day}/{start_month}/{start_year}` إلى `{end_day}/{end_month}/{end_year}`...", ephemeral=True)
     stats = {}
 
     async for msg in interaction.channel.history(after=start_date, before=end_date, limit=None):
@@ -223,6 +265,7 @@ async def mentions(
     report_title = f"منشنات قناة #{interaction.channel.name} ({start_day}/{start_month}/{start_year} - {end_day}/{end_month}/{end_year})"
     await interaction.edit_original_response(content=format_report(report_title, stats, interaction.guild, "منشن"))
 
+# ---------------- أمر الكاونت (محصور بالرتبة المحددة ويظهر بشكل خاص) ----------------
 @bot.tree.command(name="count", description="حساب عدد الرسائل لكل شخص في فترة محددة")
 @app_commands.describe(
     start_year="سنة بداية الجرد (مثال: 2026)",
@@ -237,7 +280,7 @@ async def count(
     start_year: int, start_month: int, start_day: int,
     end_year: int, end_month: int, end_day: int
 ):
-    if not has_allowed_role(interaction):
+    if not has_single_role(interaction, MENTIONS_COUNT_ALLOWED_ROLE):
         await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
         return
 
@@ -248,7 +291,7 @@ async def count(
         await interaction.response.send_message("❌ التاريخ الذي أدخلته غير صحيح!", ephemeral=True)
         return
 
-    await interaction.response.send_message(f"⏳ جاري حساب الرسائل من `{start_day}/{start_month}/{start_year}` إلى `{end_day}/{end_month}/{end_year}`...")
+    await interaction.response.send_message(f"⏳ جاري حساب الرسائل من `{start_day}/{start_month}/{start_year}` إلى `{end_day}/{end_month}/{end_year}`...", ephemeral=True)
     stats = {}
 
     async for msg in interaction.channel.history(after=start_date, before=end_date, limit=None):
@@ -258,8 +301,5 @@ async def count(
     report_title = f"رسائل قناة #{interaction.channel.name} ({start_day}/{start_month}/{start_year} - {end_day}/{end_month}/{end_year})"
     await interaction.edit_original_response(content=format_report(report_title, stats, interaction.guild, "رسالة"))
 
-
-
-# تفعيل البوت بأستخدام التوكن ليتحضن  الريندر
-
+# تشغيل البوت
 bot.run(os.getenv('TOKEN'))
