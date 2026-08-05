@@ -89,12 +89,10 @@ IMAGE_URL = "https://media.discordapp.net/attachments/1151101245537386609/147257
 # ----------------------------------------------------------------
 
 def has_role(interaction: discord.Interaction, allowed_roles: list) -> bool:
-    """فحص امتلاك العضو لأي من الرتب المسموحة"""
     user_role_ids = [role.id for role in interaction.user.roles]
     return any(role_id in user_role_ids for role_id in allowed_roles)
 
 def has_single_role(interaction: discord.Interaction, role_id: int) -> bool:
-    """فحص امتلاك العضو لرتبة واحدة معينة"""
     user_role_ids = [role.id for role in interaction.user.roles]
     return role_id in user_role_ids
 
@@ -159,7 +157,6 @@ async def keep_alive_task():
     except Exception:
         pass
 
-# مهمة التحقق من حالة الاتصال (لصالح نظام الدخول والخروج)
 @tasks.loop(minutes=1)
 async def check_offline_status():
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -172,7 +169,7 @@ async def check_offline_status():
         if member and member.status == discord.Status.offline:
             if user_id not in offline_timers:
                 offline_timers[user_id] = now
-            elif (now - offline_timers[user_id]).total_seconds() >= 600: # 10 دقائق
+            elif (now - offline_timers[user_id]).total_seconds() >= 600:
                 del active_sessions[user_id]
                 del offline_timers[user_id]
                 attendance_history.append({
@@ -204,7 +201,6 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # نظام تسجيل الدخول والخروج في الروم المخصص
     if message.channel.id == ATTENDANCE_CHANNEL_ID:
         now = datetime.datetime.now(datetime.timezone.utc)
         
@@ -245,7 +241,6 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
-# أمر !id - متاح للجميع دون تقييد
 @bot.command()
 async def id(ctx, *, name: str):
     member = None
@@ -274,20 +269,14 @@ def format_report_as_embed(title, stats, guild, unit_name="نقطة", color=disc
     for rank, (uid, count) in enumerate(sorted_data, 1):
         member = guild.get_member(uid)
         name_str = member.mention if member else f"ID: `{uid}`"
-        
-        # الاعتماد على الفراغات بين الأسطر بدلاً من الجداول
         desc += f"`#{rank}` {name_str} ──── **{count}** {unit_name}\n\n"
         
     embed.description = desc
     return embed
 
-# ---------------- أمر جرد الضباط ----------------
 @bot.tree.command(name="check_officers", description="جرد نقاط الضباط")
+@app_commands.checks.has_any_role(*OFFICERS_ALLOWED_ROLES)
 async def check_officers(interaction: discord.Interaction):
-    if not has_role(interaction, OFFICERS_ALLOWED_ROLES):
-        await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
-        return
-
     if interaction.channel_id != OFFICERS_AUDIT_CHANNEL_ID:
         await interaction.response.send_message(f"❌ يمكنك استخدام هذا الأمر فقط داخل الروم المخصصة: <#{OFFICERS_AUDIT_CHANNEL_ID}>", ephemeral=True)
         return
@@ -306,13 +295,9 @@ async def check_officers(interaction: discord.Interaction):
     embed_result = format_report_as_embed("ترتيب الضباط (حسب الصور)", stats, interaction.guild, "نقطة")
     await interaction.edit_original_response(content=None, embed=embed_result)
 
-# ---------------- أمر جرد الوحدة (القبض) ----------------
 @bot.tree.command(name="check_arrests", description="جرد نقاط القبض")
+@app_commands.checks.has_any_role(*UNIT_ALLOWED_ROLES)
 async def check_arrests(interaction: discord.Interaction):
-    if not has_role(interaction, UNIT_ALLOWED_ROLES):
-        await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
-        return
-
     if interaction.channel_id != UNIT_AUDIT_CHANNEL_ID:
         await interaction.response.send_message(f"❌ يمكنك استخدام هذا الأمر فقط داخل الروم المخصصة: <#{UNIT_AUDIT_CHANNEL_ID}>", ephemeral=True)
         return
@@ -331,8 +316,8 @@ async def check_arrests(interaction: discord.Interaction):
     embed_result = format_report_as_embed("ترتيب القبض (حسب المنشن)", stats, interaction.guild, "نقطة", discord.Color.red())
     await interaction.edit_original_response(content=None, embed=embed_result)
 
-# ---------------- أمر المنشن ----------------
 @bot.tree.command(name="mentions", description="حساب عدد المنشنات المرسلة في فترة محددة")
+@app_commands.checks.has_role(MENTIONS_COUNT_ALLOWED_ROLE)
 @app_commands.describe(
     start_year="سنة بداية الجرد (مثال: 2026)",
     start_month="شهر بداية الجرد (1-12)",
@@ -346,10 +331,6 @@ async def mentions(
     start_year: int, start_month: int, start_day: int,
     end_year: int, end_month: int, end_day: int
 ):
-    if not has_single_role(interaction, MENTIONS_COUNT_ALLOWED_ROLE):
-        await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
-        return
-
     try:
         start_date = datetime.datetime(start_year, start_month, start_day, 0, 0, 0, tzinfo=datetime.timezone.utc)
         end_date = datetime.datetime(end_year, end_month, end_day, 23, 59, 59, tzinfo=datetime.timezone.utc)
@@ -368,8 +349,8 @@ async def mentions(
     embed_result = format_report_as_embed(report_title, stats, interaction.guild, "منشن", discord.Color.orange())
     await interaction.edit_original_response(content=None, embed=embed_result)
 
-# ---------------- أمر الكاونت ----------------
 @bot.tree.command(name="count", description="حساب عدد الرسائل لكل شخص في فترة محددة")
+@app_commands.checks.has_role(MENTIONS_COUNT_ALLOWED_ROLE)
 @app_commands.describe(
     start_year="سنة بداية الجرد (مثال: 2026)",
     start_month="شهر بداية الجرد (1-12)",
@@ -383,10 +364,6 @@ async def count(
     start_year: int, start_month: int, start_day: int,
     end_year: int, end_month: int, end_day: int
 ):
-    if not has_single_role(interaction, MENTIONS_COUNT_ALLOWED_ROLE):
-        await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
-        return
-
     try:
         start_date = datetime.datetime(start_year, start_month, start_day, 0, 0, 0, tzinfo=datetime.timezone.utc)
         end_date = datetime.datetime(end_year, end_month, end_day, 23, 59, 59, tzinfo=datetime.timezone.utc)
@@ -405,15 +382,9 @@ async def count(
     embed_result = format_report_as_embed(report_title, stats, interaction.guild, "رسالة", discord.Color.green())
     await interaction.edit_original_response(content=None, embed=embed_result)
 
-
-# ---------------- الأوامر الإدارية الجديدة (كإمبيد وفراغات بين الأسطر) ----------------
-
 @bot.tree.command(name="الجرد_الأسبوعي", description="يجرد معدل الدخول والخروج للأسبوع الماضي")
+@app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def weekly_audit(interaction: discord.Interaction):
-    if not has_single_role(interaction, ADMIN_ROLE_ID):
-        await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
-        return
-
     now = datetime.datetime.now(datetime.timezone.utc)
     last_week = now - datetime.timedelta(days=7)
     
@@ -436,19 +407,14 @@ async def weekly_audit(interaction: discord.Interaction):
     for uid, seconds in sorted(users_stats.items(), key=lambda x: x[1], reverse=True):
         member = interaction.guild.get_member(uid)
         name = member.mention if member else f"ID: {uid}"
-        
         desc += f"👤 {name}\n⏳ إجمالي الوقت: **{round(seconds / 3600, 2)} ساعة**\n\n"
 
     embed.description = desc
     await interaction.response.send_message(embed=embed)
 
-
 @bot.tree.command(name="الإحصائيات_اليومية", description="قائمة بكل شخص سجل دخول وخروج اليوم")
+@app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def daily_stats(interaction: discord.Interaction):
-    if not has_single_role(interaction, ADMIN_ROLE_ID):
-        await interaction.response.send_message("❌ ليس لديك الصلاحية.", ephemeral=True)
-        return
-
     now = datetime.datetime.now(datetime.timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     
@@ -461,10 +427,8 @@ async def daily_stats(interaction: discord.Interaction):
             found = True
             member = interaction.guild.get_member(record["user_id"])
             name = member.mention if member else f"ID: {record['user_id']}"
-            
             t_in = record["login"].strftime("%H:%M")
             t_out = record["logout"].strftime("%H:%M")
-            
             desc += f"👤 {name}\n📥 الدخول: `{t_in}`\n📤 الخروج: `{t_out}`\n\n"
             
     if not found:
@@ -473,13 +437,9 @@ async def daily_stats(interaction: discord.Interaction):
     embed.description = desc
     await interaction.response.send_message(embed=embed)
 
-
 @bot.tree.command(name="قائمة_المتصدرين_الشهرية", description="أكثر الأشخاص تفاعلاً خلال آخر شهر")
+@app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def monthly_leaderboard(interaction: discord.Interaction):
-    if not has_single_role(interaction, ADMIN_ROLE_ID):
-        await interaction.response.send_message("❌ ليس لديك الصلاحية.", ephemeral=True)
-        return
-
     now = datetime.datetime.now(datetime.timezone.utc)
     last_month = now - datetime.timedelta(days=30)
     
@@ -502,19 +462,14 @@ async def monthly_leaderboard(interaction: discord.Interaction):
     for rank, (uid, seconds) in enumerate(sorted(users_stats.items(), key=lambda x: x[1], reverse=True), 1):
         member = interaction.guild.get_member(uid)
         name = member.mention if member else f"ID: {uid}"
-        
         desc += f"**المركز {rank}** 🏅\n👤 {name}\n⏱️ **{round(seconds / 3600, 2)} ساعة**\n\n"
 
     embed.description = desc
     await interaction.response.send_message(embed=embed)
 
-
 @bot.tree.command(name="قائمة_المتصدرين", description="أكثر الأشخاص تفاعلاً بشكل كامل")
+@app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def all_time_leaderboard(interaction: discord.Interaction):
-    if not has_single_role(interaction, ADMIN_ROLE_ID):
-        await interaction.response.send_message("❌ ليس لديك الصلاحية.", ephemeral=True)
-        return
-
     users_stats = {}
     for record in attendance_history:
         uid = record["user_id"]
@@ -533,19 +488,14 @@ async def all_time_leaderboard(interaction: discord.Interaction):
     for rank, (uid, seconds) in enumerate(sorted(users_stats.items(), key=lambda x: x[1], reverse=True), 1):
         member = interaction.guild.get_member(uid)
         name = member.mention if member else f"ID: {uid}"
-        
         desc += f"**المركز {rank}** 🌟\n👤 {name}\n⏱️ **{round(seconds / 3600, 2)} ساعة**\n\n"
 
     embed.description = desc
     await interaction.response.send_message(embed=embed)
 
-
 @bot.tree.command(name="بدأ_فعالية", description="يبدأ احتساب الساعات لفعالية جديدة")
+@app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def start_event(interaction: discord.Interaction):
-    if not has_single_role(interaction, ADMIN_ROLE_ID):
-        await interaction.response.send_message("❌ ليس لديك الصلاحية.", ephemeral=True)
-        return
-
     event_data["is_active"] = True
     event_data["start_time"] = datetime.datetime.now(datetime.timezone.utc)
     
@@ -556,13 +506,9 @@ async def start_event(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed)
 
-
 @bot.tree.command(name="انهاء_الفعالية", description="ينهي الفعالية ويعرض قائمة المتصدرين الخاصة بها")
+@app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def end_event(interaction: discord.Interaction):
-    if not has_single_role(interaction, ADMIN_ROLE_ID):
-        await interaction.response.send_message("❌ ليس لديك الصلاحية.", ephemeral=True)
-        return
-
     if not event_data["is_active"]:
         await interaction.response.send_message("⚠️ لا توجد فعالية نشطة حالياً لإنهائها.", ephemeral=True)
         return
@@ -575,7 +521,6 @@ async def end_event(interaction: discord.Interaction):
             uid = record["user_id"]
             if uid not in users_stats:
                 users_stats[uid] = 0
-            
             log_start = max(record["login"], start_time)
             users_stats[uid] += (record["logout"] - log_start).total_seconds()
 
@@ -588,15 +533,22 @@ async def end_event(interaction: discord.Interaction):
         for rank, (uid, seconds) in enumerate(sorted(users_stats.items(), key=lambda x: x[1], reverse=True), 1):
             member = interaction.guild.get_member(uid)
             name = member.mention if member else f"ID: {uid}"
-            
             desc += f"**المركز {rank}** 🎁\n👤 {name}\n⏱️ **{round(seconds / 3600, 2)} ساعة**\n\n"
-            
         embed.description = desc
 
     event_data["is_active"] = False
     event_data["start_time"] = None
     
     await interaction.response.send_message(embed=embed)
+
+# معالجة أخطاء الصلاحيات لتظهر بشكل منظم ومفهوم للمستخدم
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.errors.MissingRole) or isinstance(error, app_commands.errors.MissingAnyRole):
+        if not interaction.response.is_done():
+            await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
+    else:
+        print(f"خطأ في أمر السلاش: {error}")
 
 # تشغيل البوت
 bot.run(os.getenv('TOKEN'))
