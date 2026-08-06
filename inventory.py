@@ -287,7 +287,7 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
-# ----------------- النوافذ التفاعلية (Modals & Views) -----------------
+# ----------------- النوافذ التفاعلية (Modals & Views) المُصححة بالكامل -----------------
 class SummonModal(discord.ui.Modal, title="إصدار استدعاء رسمي ⚖️"):
     target_user_id = discord.ui.TextInput(label="أيدي الشخص المراد استدعاؤه (User ID)", placeholder="مثال: 1521418837378072656", required=True)
     reason = discord.ui.TextInput(label="السبب", placeholder="اكتب سبب الاستدعاء هنا...", style=discord.TextStyle.paragraph, required=True)
