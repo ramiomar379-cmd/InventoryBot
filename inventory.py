@@ -101,7 +101,7 @@ def has_single_role(interaction: discord.Interaction, role_id: int) -> bool:
     user_role_ids = [role.id for role in interaction.user.roles]
     return role_id in user_role_ids
 
-# دالة إرسال التقرير الشامل لأوامر السلاش (مع النتيجة والرد)
+# دالة إرسال التقرير الشامل لأوامر السلاش
 async def send_slash_log(interaction: discord.Interaction, result_text: str, is_success: bool = True):
     try:
         log_channel = bot.get_channel(LOG_SLASH_COMMANDS_CHANNEL_ID)
@@ -111,7 +111,7 @@ async def send_slash_log(interaction: discord.Interaction, result_text: str, is_
             
             embed = discord.Embed(title=status_title, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
             embed.add_field(name="👤 العضو", value=f"{interaction.user.mention} (`{interaction.user.id}`)", inline=False)
-            embed.add_field(name="🛠️ الأمر", value=f"`/{interaction.command.name if interaction.command else 'Unknown'}`", inline=True)
+            embed.add_field(name="🛠️ الأمر", value=`/{interaction.command.name if interaction.command else 'Unknown'}`, inline=True)
             embed.add_field(name="📍 الروم", value=f"{interaction.channel.mention if interaction.channel else 'Unknown'}", inline=True)
             embed.add_field(name="💬 الرد / النتيجة الصادرة", value=f"```{result_text[:1000]}```", inline=False)
             
@@ -129,7 +129,7 @@ async def send_sync_log(text: str):
     except Exception as e:
         print(f"❌ خطأ في إرسال لوق المُزامنة: {e}")
 
-# دالة إرسال لوق ورقة الحضور (مع إرسال الـ GIF الفاصل تلقائياً)
+# دالة إرسال لوق ورقة الحضور
 async def send_attendance_log(text: str, color=discord.Color.green()):
     try:
         log_channel = bot.get_channel(LOG_ATTENDANCE_CHANNEL_ID)
@@ -229,7 +229,13 @@ async def check_offline_status():
             continue
             
         member = guild.get_member(user_id)
-        if member and member.status == discord.Status.offline:
+        if not member:
+            continue
+            
+        # التحقق مما إذا كان العضو أوفلاين أو غير متصل (بما يشمل الحالة العادية بدون نشاط مرئي دقيق)
+        is_offline = member.status == discord.Status.offline or member.status == discord.Status.invisible
+        
+        if is_offline:
             if user_id not in offline_timers:
                 offline_timers[user_id] = now
             elif (now - offline_timers[user_id]).total_seconds() >= 600:
@@ -280,6 +286,8 @@ async def on_message(message: discord.Message):
             embed.set_footer(text="تسجيل الدخول د\nتسجيل الخروج خ")
             
             await message.channel.send(embed=embed)
+            # إرسال الـ GIF الفاصل تلقائياً في روم ورقة الحضور العامة
+            await message.channel.send(DIVIDER_GIF_URL)
             await message.delete()
             await send_attendance_log(f"📥 تسجيل دخول المحامي: {message.author.mention} (`{message.author.id}`)", discord.Color.green())
 
@@ -302,6 +310,8 @@ async def on_message(message: discord.Message):
                 embed.set_footer(text="تسجيل الدخول د\nتسجيل الخروج خ")
                 
                 await message.channel.send(embed=embed)
+                # إرسال الـ GIF الفاصل تلقائياً في روم ورقة الحضور العامة
+                await message.channel.send(DIVIDER_GIF_URL)
                 await message.delete()
                 
                 duration = round((now - login_time).total_seconds() / 3600, 2)
