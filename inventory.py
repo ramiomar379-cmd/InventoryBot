@@ -289,18 +289,17 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
-    if message.author.bot:
-        return
-
-    # 1. إرسال الخط الفاصل تلقائياً في أي روم مدرجة في القائمة المحددة
+    # 1. إرسال الخط الفاصل تلقائياً في أي روم مدرجة (سواء الرسالة من عضو أو من البوت نفسه)
     if message.channel.id in TARGET_CHANNELS_FOR_DIVIDER:
-        # نتأكد أن الرسالة ليست هي الخط نفسه لمنع التكرار اللانهائي
         if message.content != DIVIDER_GIF_URL:
-            # إذا لم تكن روم الحضور (لأن الحضور لها معالجة خاصة بالأسفل)
             if message.channel.id != ATTENDANCE_CHANNEL_ID:
                 await message.channel.send(DIVIDER_GIF_URL)
 
-    # 2. معالجة روم تسجيل الحضور (-د / -خ)
+    # 2. إذا كانت الرسالة صادرة من بوت، نتوقف هنا لكي لا يعالجها كنص أوامر أو تسجيل حضور
+    if message.author.bot:
+        return
+
+    # 3. معالجة روم تسجيل الحضور (-د / -خ)
     if message.channel.id == ATTENDANCE_CHANNEL_ID:
         now = datetime.datetime.now(datetime.timezone.utc)
         
