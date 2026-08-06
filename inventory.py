@@ -32,6 +32,7 @@ ADMIN_ROLE_ID = 1526667402325131414
 LOG_SLASH_COMMANDS_CHANNEL_ID = 1526668615812907129  # لوق أوامر السلاش
 LOG_SYNC_CHANNEL_ID = 1526668612398485584          # لوق المُزامنة
 LOG_ATTENDANCE_CHANNEL_ID = 1534711951144390806    # لوق ورقة الحضور
+LOG_ID_COMMAND_CHANNEL_ID = 1534715397570560071    # لوق أمر id
 
 # جرد الضباط
 OFFICERS_AUDIT_CHANNEL_ID = 1526668727657955418
@@ -99,16 +100,20 @@ def has_single_role(interaction: discord.Interaction, role_id: int) -> bool:
     user_role_ids = [role.id for role in interaction.user.roles]
     return role_id in user_role_ids
 
-# دالة إرسال لوق أوامر السلاش تلقائياً
-async def send_slash_log(interaction: discord.Interaction):
+# دالة إرسال التقرير الشامل لأوامر السلاش (مع النتيجة والرد)
+async def send_slash_log(interaction: discord.Interaction, result_text: str, is_success: bool = True):
     try:
         log_channel = bot.get_channel(LOG_SLASH_COMMANDS_CHANNEL_ID)
         if log_channel:
-            embed = discord.Embed(title="⚙️ لوق استخدام أمر سلاش", color=discord.Color.blue(), timestamp=datetime.datetime.now(datetime.timezone.utc))
-            embed.add_name = "المستخدم"
-            embed.add_field(name="👤 العضو", value=f"{interaction.user.mention} (`{interaction.user.id}`)", inline=True)
-            embed.add_field(name="🛠️ الأمر", value=f"`/{interaction.command.name}`", inline=True)
-            embed.add_field(name="📍 الروم", value=f"{interaction.channel.mention}", inline=False)
+            color = discord.Color.green() if is_success else discord.Color.red()
+            status_title = "✅ تنفيذ أمر سلاش بنجاح" if is_success else "⚠️ فشل أو رفض أمر سلاش"
+            
+            embed = discord.Embed(title=status_title, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
+            embed.add_field(name="👤 العضو", value=f"{interaction.user.mention} (`{interaction.user.id}`)", inline=False)
+            embed.add_field(name="🛠️ الأمر", value=f"`/{interaction.command.name if interaction.command else 'Unknown'}`", inline=True)
+            embed.add_field(name="📍 الروم", value=f"{interaction.channel.mention if interaction.channel else 'Unknown'}", inline=True)
+            embed.add_field(name="💬 الرد / النتيجة الصادرة", value=f"```{result_text[:1000]}```", inline=False)
+            
             await log_channel.send(embed=embed)
     except Exception as e:
         print(f"❌ خطأ في إرسال لوق أوامر السلاش: {e}")
@@ -132,6 +137,16 @@ async def send_attendance_log(text: str, color=discord.Color.green()):
             await log_channel.send(embed=embed)
     except Exception as e:
         print(f"❌ خطأ في إرسال لوق ورقة الحضور: {e}")
+
+# دالة إرسال لوق أمر id
+async def send_id_log(text: str):
+    try:
+        log_channel = bot.get_channel(LOG_ID_COMMAND_CHANNEL_ID)
+        if log_channel:
+            embed = discord.Embed(title="🔍 لوق استخدام أمر id", description=text, color=discord.Color.blue(), timestamp=datetime.datetime.now(datetime.timezone.utc))
+            await log_channel.send(embed=embed)
+    except Exception as e:
+        print(f"❌ خطأ في إرسال لوق أمر id: {e}")
 
 async def sync_user_data(main_member: discord.Member, sec_member: discord.Member):
     changes = []
@@ -305,8 +320,10 @@ async def id(ctx, *, name: str):
         embed.add_field(name="الاسم الكامل", value=member.mention, inline=True)
         embed.add_field(name="User ID", value=f"`{member.id}`", inline=True)
         await ctx.send(embed=embed)
+        await send_id_log(f"👤 المستخدم: {ctx.author.mention} (`{ctx.author.id}`)\n🔍 البحث عن: `{name}`\n✅ النتيجة: تم العثور على العضو {member.mention} (`{member.id}`)")
     else:
         await ctx.send(f"❌ لم يتم العثور على أي شخص باسم: `{name}`")
+        await send_id_log(f"👤 المستخدم: {ctx.author.mention} (`{ctx.author.id}`)\n🔍 البحث عن: `{name}`\n❌ النتيجة: لم يتم العثور على أي عضو بهذا الاسم.")
 
 def format_report_as_embed(title, stats, guild, unit_name="نقطة", color=discord.Color.blue()):
     embed = discord.Embed(title=f"📊 {title}", color=color)
@@ -328,9 +345,10 @@ def format_report_as_embed(title, stats, guild, unit_name="نقطة", color=disc
 @bot.tree.command(name="check_officers", description="جرد نقاط الضباط")
 @app_commands.checks.has_any_role(*OFFICERS_ALLOWED_ROLES)
 async def check_officers(interaction: discord.Interaction):
-    await send_slash_log(interaction)
     if interaction.channel_id != OFFICERS_AUDIT_CHANNEL_ID:
-        await interaction.response.send_message(f"❌ يمكنك استخدام هذا الأمر فقط داخل الروم المخصصة: <#{OFFICERS_AUDIT_CHANNEL_ID}>", ephemeral=True)
+        msg = f"يمكن استخدام هذا الأمر فقط داخل الروم المخصصة: <#{OFFICERS_AUDIT_CHANNEL_ID}>"
+        await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
+        await send_slash_log(interaction, msg, is_success=False)
         return
 
     await interaction.response.send_message("⏳ جاري جرد نقاط الضباط...", ephemeral=True)
@@ -346,13 +364,15 @@ async def check_officers(interaction: discord.Interaction):
                     
     embed_result = format_report_as_embed("ترتيب الضباط (حسب الصور)", stats, interaction.guild, "نقطة")
     await interaction.edit_original_response(content=None, embed=embed_result)
+    await send_slash_log(interaction, f"تم جرد نقاط الضباط بنجاح وعرض القائمة.", is_success=True)
 
 @bot.tree.command(name="check_arrests", description="جرد نقاط القبض")
 @app_commands.checks.has_any_role(*UNIT_ALLOWED_ROLES)
 async def check_arrests(interaction: discord.Interaction):
-    await send_slash_log(interaction)
     if interaction.channel_id != UNIT_AUDIT_CHANNEL_ID:
-        await interaction.response.send_message(f"❌ يمكنك استخدام هذا الأمر فقط داخل الروم المخصصة: <#{UNIT_AUDIT_CHANNEL_ID}>", ephemeral=True)
+        msg = f"يمكن استخدام هذا الأمر فقط داخل الروم المخصصة: <#{UNIT_AUDIT_CHANNEL_ID}>"
+        await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
+        await send_slash_log(interaction, msg, is_success=False)
         return
 
     await interaction.response.send_message("⏳ جاري جرد نقاط القبض...", ephemeral=True)
@@ -368,6 +388,7 @@ async def check_arrests(interaction: discord.Interaction):
                     
     embed_result = format_report_as_embed("ترتيب القبض (حسب المنشن)", stats, interaction.guild, "نقطة", discord.Color.red())
     await interaction.edit_original_response(content=None, embed=embed_result)
+    await send_slash_log(interaction, "تم جرد نقاط القبض بنجاح وعرض القائمة.", is_success=True)
 
 @bot.tree.command(name="mentions", description="حساب عدد المنشنات المرسلة في فترة محددة")
 @app_commands.checks.has_role(MENTIONS_COUNT_ALLOWED_ROLE)
@@ -384,12 +405,13 @@ async def mentions(
     start_year: int, start_month: int, start_day: int,
     end_year: int, end_month: int, end_day: int
 ):
-    await send_slash_log(interaction)
     try:
         start_date = datetime.datetime(start_year, start_month, start_day, 0, 0, 0, tzinfo=datetime.timezone.utc)
         end_date = datetime.datetime(end_year, end_month, end_day, 23, 59, 59, tzinfo=datetime.timezone.utc)
     except ValueError:
-        await interaction.response.send_message("❌ التاريخ الذي أدخلته غير صحيح!", ephemeral=True)
+        msg = "التاريخ الذي أدخلته غير صحيح!"
+        await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
+        await send_slash_log(interaction, msg, is_success=False)
         return
 
     await interaction.response.send_message(f"⏳ جاري حساب المنشنات من `{start_day}/{start_month}/{start_year}` إلى `{end_day}/{end_month}/{end_year}`...", ephemeral=True)
@@ -402,6 +424,7 @@ async def mentions(
     report_title = f"منشنات قناة #{interaction.channel.name} ({start_day}/{start_month} - {end_day}/{end_month})"
     embed_result = format_report_as_embed(report_title, stats, interaction.guild, "منشن", discord.Color.orange())
     await interaction.edit_original_response(content=None, embed=embed_result)
+    await send_slash_log(interaction, f"تم حساب المنشنات بنجاح للفترة المحددة.", is_success=True)
 
 @bot.tree.command(name="count", description="حساب عدد الرسائل لكل شخص في فترة محددة")
 @app_commands.checks.has_role(MENTIONS_COUNT_ALLOWED_ROLE)
@@ -418,12 +441,13 @@ async def count(
     start_year: int, start_month: int, start_day: int,
     end_year: int, end_month: int, end_day: int
 ):
-    await send_slash_log(interaction)
     try:
         start_date = datetime.datetime(start_year, start_month, start_day, 0, 0, 0, tzinfo=datetime.timezone.utc)
         end_date = datetime.datetime(end_year, end_month, end_day, 23, 59, 59, tzinfo=datetime.timezone.utc)
     except ValueError:
-        await interaction.response.send_message("❌ التاريخ الذي أدخلته غير صحيح!", ephemeral=True)
+        msg = "التاريخ الذي أدخلته غير صحيح!"
+        await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
+        await send_slash_log(interaction, msg, is_success=False)
         return
 
     await interaction.response.send_message(f"⏳ جاري حساب الرسائل من `{start_day}/{start_month}/{start_year}` إلى `{end_day}/{end_month}/{end_year}`...", ephemeral=True)
@@ -436,11 +460,11 @@ async def count(
     report_title = f"رسائل قناة #{interaction.channel.name} ({start_day}/{start_month} - {end_day}/{end_month})"
     embed_result = format_report_as_embed(report_title, stats, interaction.guild, "رسالة", discord.Color.green())
     await interaction.edit_original_response(content=None, embed=embed_result)
+    await send_slash_log(interaction, "تم حساب عدد الرسائل بنجاح.", is_success=True)
 
 @bot.tree.command(name="الجرد_الأسبوعي", description="يجرد معدل الدخول والخروج للأسبوع الماضي")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def weekly_audit(interaction: discord.Interaction):
-    await send_slash_log(interaction)
     now = datetime.datetime.now(datetime.timezone.utc)
     last_week = now - datetime.timedelta(days=7)
     
@@ -457,6 +481,7 @@ async def weekly_audit(interaction: discord.Interaction):
     if not users_stats:
         embed.description = "لا توجد بيانات للأسبوع الماضي."
         await interaction.response.send_message(embed=embed)
+        await send_slash_log(interaction, "الجرد الأسبوعي: لا توجد بيانات للأسبوع الماضي.", is_success=True)
         return
 
     desc = ""
@@ -467,11 +492,11 @@ async def weekly_audit(interaction: discord.Interaction):
 
     embed.description = desc
     await interaction.response.send_message(embed=embed)
+    await send_slash_log(interaction, "تم إرسال والجرد الأسبوعي بنجاح.", is_success=True)
 
 @bot.tree.command(name="الإحصائيات_اليومية", description="قائمة بكل شخص سجل دخول وخروج اليوم")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def daily_stats(interaction: discord.Interaction):
-    await send_slash_log(interaction)
     now = datetime.datetime.now(datetime.timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     
@@ -493,11 +518,11 @@ async def daily_stats(interaction: discord.Interaction):
         
     embed.description = desc
     await interaction.response.send_message(embed=embed)
+    await send_slash_log(interaction, "تم عرض الإحصائيات اليومية بنجاح.", is_success=True)
 
 @bot.tree.command(name="قائمة_المتصدرين_الشهرية", description="أكثر الأشخاص تفاعلاً خلال آخر شهر")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def monthly_leaderboard(interaction: discord.Interaction):
-    await send_slash_log(interaction)
     now = datetime.datetime.now(datetime.timezone.utc)
     last_month = now - datetime.timedelta(days=30)
     
@@ -514,6 +539,7 @@ async def monthly_leaderboard(interaction: discord.Interaction):
     if not users_stats:
         embed.description = "لا توجد بيانات كافية."
         await interaction.response.send_message(embed=embed)
+        await send_slash_log(interaction, "قائمة المتصدرين الشهرية: لا توجد بيانات كافية.", is_success=True)
         return
 
     desc = ""
@@ -524,11 +550,11 @@ async def monthly_leaderboard(interaction: discord.Interaction):
 
     embed.description = desc
     await interaction.response.send_message(embed=embed)
+    await send_slash_log(interaction, "تم عرض قائمة المتصدرين الشهرية بنجاح.", is_success=True)
 
 @bot.tree.command(name="قائمة_المتصدرين", description="أكثر الأشخاص تفاعلاً بشكل كامل")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def all_time_leaderboard(interaction: discord.Interaction):
-    await send_slash_log(interaction)
     users_stats = {}
     for record in attendance_history:
         uid = record["user_id"]
@@ -541,6 +567,7 @@ async def all_time_leaderboard(interaction: discord.Interaction):
     if not users_stats:
         embed.description = "لا توجد بيانات مسجلة بعد."
         await interaction.response.send_message(embed=embed)
+        await send_slash_log(interaction, "قائمة المتصدرين الشاملة: لا توجد بيانات مسجلة بعد.", is_success=True)
         return
 
     desc = ""
@@ -551,11 +578,11 @@ async def all_time_leaderboard(interaction: discord.Interaction):
 
     embed.description = desc
     await interaction.response.send_message(embed=embed)
+    await send_slash_log(interaction, "تم عرض قائمة المتصدرين الشاملة بنجاح.", is_success=True)
 
 @bot.tree.command(name="بدأ_فعالية", description="يبدأ احتساب الساعات لفعالية جديدة")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def start_event(interaction: discord.Interaction):
-    await send_slash_log(interaction)
     event_data["is_active"] = True
     event_data["start_time"] = datetime.datetime.now(datetime.timezone.utc)
     
@@ -565,13 +592,15 @@ async def start_event(interaction: discord.Interaction):
         color=discord.Color.green()
     )
     await interaction.response.send_message(embed=embed)
+    await send_slash_log(interaction, "تم بدء الفعالية بنجاح.", is_success=True)
 
 @bot.tree.command(name="انهاء_الفعالية", description="ينهي الفعالية ويعرض قائمة المتصدرين الخاصة بها")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def end_event(interaction: discord.Interaction):
-    await send_slash_log(interaction)
     if not event_data["is_active"]:
-        await interaction.response.send_message("⚠️ لا توجد فعالية نشطة حالياً لإنهائها.", ephemeral=True)
+        msg = "لا توجد فعالية نشطة حالياً لإنهائها."
+        await interaction.response.send_message(f"⚠️ {msg}", ephemeral=True)
+        await send_slash_log(interaction, msg, is_success=False)
         return
 
     start_time = event_data["start_time"]
@@ -601,13 +630,20 @@ async def end_event(interaction: discord.Interaction):
     event_data["start_time"] = None
     
     await interaction.response.send_message(embed=embed)
+    await send_slash_log(interaction, "تم إنهاء الفعالية وعرض النتائج بنجاح.", is_success=True)
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, (app_commands.errors.MissingRole, app_commands.errors.MissingAnyRole)):
+        msg = "ليس لديك الصلاحية لاستخدام هذا الأمر."
         if not interaction.response.is_done():
-            await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
+            await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
+        await send_slash_log(interaction, f"فشل بسبب نقص الصلاحيات: {msg}", is_success=False)
     else:
+        err_msg = str(error)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(f"❌ حدث خطأ أثناء تنفيذ الأمر.", ephemeral=True)
+        await send_slash_log(interaction, f"خطأ تقني: {err_msg}", is_success=False)
         print(f"خطأ في أمر السلاش: {error}")
 
 # تشغيل البوت
