@@ -474,7 +474,7 @@ class SummonChoiceView(discord.ui.View):
             return
 
         embed = discord.Embed(
-            title="الجمهورية • النيابة العامة | بلاغ استدعاء رسمي",
+            title="وزارة العدل • النيابة العامة | أخطار استدعاء رسمي",
             color=color,
             timestamp=datetime.datetime.now(datetime.timezone.utc)
         )
@@ -495,7 +495,7 @@ class SummonChoiceView(discord.ui.View):
         
         embed.set_image(url=SUMMON_IMAGE_URL)
         icon_url = interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None
-        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق القضائي", icon_url=icon_url)
+        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق النيابي", icon_url=icon_url)
         await target_channel.send(content="||@everyone|| ||@here||", embed=embed)
         
         if interaction.user.id in summon_wizard_sessions:
@@ -566,7 +566,7 @@ async def weekly_squad_audit(interaction: discord.Interaction):
     current_date = datetime.datetime.now().strftime("%Y/%m/%d")
 
     final_msg = (
-        "| ﷽ |\n\n\n"
+        "**| ﷽ |\n\n\n"
         f"الرقم: ({weekly_audit_counter})\n"
         f"التاريخ: ({current_date})\n\n"
         "السلام عليكم ورحمة الله وبركاته .\n"
@@ -586,7 +586,7 @@ async def weekly_squad_audit(interaction: discord.Interaction):
         "والله ولي التوفيق .\n\n"
         "التوقيع :\n\n"
         f"{sig_mentions}\n\n"
-        "[|| @everyone || -- || @here ||]"
+        "[|| @everyone || -- || @here ||]**"
     )
     weekly_audit_counter += 1
     await target_channel.send(content=final_msg)
@@ -604,7 +604,7 @@ async def monthly_squad_audit(interaction: discord.Interaction):
     sig_mentions = get_role_members_mentions(interaction.guild, 1526957036561236141)
     
     initial_msg = (
-        "| ﷽ |\n\n"
+        "**| ﷽ |\n\n"
         "السلام عليكم ورحمة الله وبركاته .\n"
         "والصلاة والسلام على أشرف الأنبياء والمرسلين .\n"
         "أسعد الله أوقاتكم بكل خير .\n\n"
@@ -616,7 +616,7 @@ async def monthly_squad_audit(interaction: discord.Interaction):
         "يبلغ أمرنا هذا للجهات المختصة فور صدوره .\n\n"
         "التوقيع :\n\n"
         f"{sig_mentions}\n\n"
-        "[|| @everyone || -- || @here ||]"
+        "[|| @everyone || -- || @here ||]**"
     )
     await target_channel.send(content=initial_msg)
     
@@ -654,7 +654,7 @@ async def monthly_squad_audit(interaction: discord.Interaction):
     current_date = datetime.datetime.now().strftime("%Y/%m/%d")
 
     final_msg = (
-        "| ﷽ |\n\n\n"
+        "**| ﷽ |\n\n\n"
         f"الرقم: ({monthly_audit_counter})\n"
         f"التاريخ: ({current_date})\n\n"
         "السلام عليكم ورحمة الله وبركاته .\n"
@@ -674,7 +674,7 @@ async def monthly_squad_audit(interaction: discord.Interaction):
         "والله ولي التوفيق .\n\n"
         "التوقيع :\n\n"
         f"{sig_mentions}\n\n"
-        "[|| @everyone || -- || @here ||]"
+        "[|| @everyone || -- || @here ||]**"
     )
     monthly_audit_counter += 1
     await target_channel.send(content=final_msg)
@@ -707,13 +707,13 @@ class StopInvestigationModal(discord.ui.Modal, title="رفع التحقيق وإ
             return
 
         embed = discord.Embed(
-            title="الجمهورية • النيابة العامة | قرار رفع الإيقاف",
+            title="وزارة العدل・النيابة العامة | قرار رفع الإيقاف",
             color=discord.Color.green(),
             timestamp=datetime.datetime.now(datetime.timezone.utc)
         )
         
         embed.description = (
-            "بسم الله الرحمن الرحيم\n\n"
+            "**بسم الله الرحمن الرحيم\n\n"
             "السلام عليكم ورحمة الله وبركاته،\n"
             "تحية طيبة وبعد،\n\n"
             "بناءً على مجريات التحقيق، وبعد مراجعة الحيثيات المتعلقة بالقرار السابق، تقرر رسمياً رفع الإيقاف وإعادة الاعتبار للعضو الموضحة بياناته أدناه.\n\n"
@@ -721,12 +721,12 @@ class StopInvestigationModal(discord.ui.Modal, title="رفع التحقيق وإ
             f"الحيثيات والأسباب:\n{self.reason.value.strip()}\n\n"
             f"المسؤول المُصدر للقرار: <@{self.officer_id.value.strip()}> (`{self.officer_id.value.strip()}`)\n\n"
             f"رتبة المسؤول التنفيذي: <@&{self.officer_role_id.value.strip()}>\n\n"
-            "الحالة النظامية:\nتم استئناف كافة الصلاحيات والعودة لممارسة مهام العمل بشكل رسمي."
+            "الحالة النظامية:\nتم استئناف كافة الصلاحيات والعودة لممارسة مهام العمل بشكل رسمي.**"
         )
         
         embed.set_image(url=SUMMON_IMAGE_URL)
         icon_url = interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None
-        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق القضائي", icon_url=icon_url)
+        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق النيابي", icon_url=icon_url)
         await target_channel.send(content="||@everyone|| ||@here||", embed=embed)
         await interaction.followup.send("✅ **تم إصدار وتوثيق قرار رفع التحقيق وإعادة العضو للعمل بنجاح!**", ephemeral=True)
         await send_slash_log(interaction, f"تم تنفيذ أمر /وقف_عنه_التحقيق للعضو ID: `{self.target_user_id.value}`", is_success=True)
