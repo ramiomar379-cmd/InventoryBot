@@ -442,7 +442,7 @@ class SummonChoiceView(discord.ui.View):
             return
 
         embed = discord.Embed(
-            title="🏛️ الجمهورية • النيابة العامة | بـلاغ اسـتدعـاء رسـمي",
+            title="🏛️ وزارة العدل • النيابة العامة | بـلاغ اسـتدعـاء رسـمي",
             color=color,
             timestamp=datetime.datetime.now(datetime.timezone.utc)
         )
@@ -463,7 +463,7 @@ class SummonChoiceView(discord.ui.View):
         
         embed.set_image(url=SUMMON_IMAGE_URL)
         icon_url = interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None
-        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق القضائي", icon_url=icon_url)
+        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق الإداري", icon_url=icon_url)
 
         await target_channel.send(content="||@everyone|| ||@here||", embed=embed)
         
@@ -501,7 +501,7 @@ class StopInvestigationModal(discord.ui.Modal, title="رفع التحقيق وإ
             return
 
         embed = discord.Embed(
-            title="🏛️ الجمهورية • النيابة العامة | قـرار رفـع الإيقـاف",
+            title="🏛️ وزارة العدل • النيابة العامة | قـرار رفـع الإيقـاف",
             color=discord.Color.green(),
             timestamp=datetime.datetime.now(datetime.timezone.utc)
         )
@@ -520,7 +520,7 @@ class StopInvestigationModal(discord.ui.Modal, title="رفع التحقيق وإ
         
         embed.set_image(url=SUMMON_IMAGE_URL)
         icon_url = interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None
-        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق القضائي", icon_url=icon_url)
+        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق الأداري", icon_url=icon_url)
 
         await target_channel.send(content="||@everyone|| ||@here||", embed=embed)
         await interaction.followup.send("✅ **تم إصدار وتوثيق قرار رفع التحقيق وإعادة العضو للعمل بنجاح!**", ephemeral=True)
