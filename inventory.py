@@ -301,8 +301,8 @@ async def on_message(message: discord.Message):
             roles_mention_str = " ".join([r.mention for r in allowed_roles_list]) if allowed_roles_list else "لا توجد رتب محددة"
             
             await channel.send(
-                "🔒 **تنبيه إداري رسمي:**\n\n"
-                "تم إغلاق هذه الروم نهائياً بأمر الإدارة العليا، ولا يحق لأي أحد الكتابة فيها حالياً.\n\n"
+                "🔒 **تم إغلاق الروم:**\n\n"
+                "لا تتعب نفسك أتركه علي.\n\n"
                 f"📌 **الرتب التي تم إغلاق الروم عليها وصلاحياتها:**\n{roles_mention_str}"
             )
             await send_custom_log(
