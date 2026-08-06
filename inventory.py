@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 import os
 import datetime
+import asyncio
 import requests
 from flask import Flask
 from threading import Thread
@@ -29,6 +30,12 @@ MENTIONS_COUNT_ALLOWED_ROLE = 1526667402325131414
 ADMIN_ROLE_ID = 1526667402325131414
 SUMMON_ALLOWED_ROLE_ID = 1527238059303899146
 
+# رتب صلاحية جرد الكتائب
+SQUAD_AUDIT_ROLES = [1526667439306178580, 1526957036561236141]
+
+# قناة اللوق الإضافية لجرد الضباط والقبض
+EXTRA_AUDIT_LOG_CHANNEL_ID = 1526668577971765449
+
 TARGET_CHANNELS_FOR_DIVIDER = [
     1534713004271079604, 1526668612398485584, 1526668615812907129,
     1534715397570560071, 1534711951144390806, 1526668510649122947,
@@ -36,17 +43,11 @@ TARGET_CHANNELS_FOR_DIVIDER = [
     1526955624255066332, 1527751172029550713, 1526668199662452767,
     1526668203546382406, 1526668224140414986, 1528548590392180846,
     1527474093694390374, 1527464432618438778, 1526668041843249233,
-    1526668648041681006, 1531025442390147262, 1534729850160545942,
-    1534943475945177338, 1526668562880532541, 1526668566571515965,
-    1526668569939808286, 1526668573324480665, 1526668577971765449,
-    1526668580832280746, 1526668583793459241, 1527419985276829798,
-    1526668587694031030, 1526668587694031030, 1526668590894284993,
-    1526668594505846824, 1526668597970341948, 1526668601455542413,
-    1526668604894871552, 1526668608690716673
+    1526668648041681006, 1531025442390147262, 1534729850160545942
 ]
 
 LOG_SLASH_COMMANDS_CHANNEL_ID = 1526668615812907129  
-LOG_SYNC_CHANNEL_ID = 1526668612398485584         
+LOG_SYNC_CHANNEL_ID = 1526668612398485584          
 LOG_ATTENDANCE_CHANNEL_ID = 1534711951144390806    
 LOG_ID_COMMAND_CHANNEL_ID = 1534715397570560071    
 SUMMON_TARGET_CHANNEL_ID = 1534729850160545942
@@ -65,9 +66,35 @@ UNIT_ALLOWED_ROLES = [
 ]
 
 ATTENDANCE_CHANNEL_ID = 1526668199662452767
+
+# -------------------------------- بيانات الكتائب للجرد --------------------------------
+SQUADS_DATA = {
+    "unit": {
+        "name": "وحدة إلقاء القبض",
+        "role_id": 1526667549956116642,
+        "channels": [1526668398719926362, 1526668402947653823, 1526668405619560468, 1526668409046171699, 1526668395406430308],
+        "leaders": [1526667440426188890, 1526667441395208305]
+    },
+    "eco": {
+        "name": "E.C.O",
+        "role_id": 1526667532340170952,
+        "channels": [1526668472702992514, 1526668479556489307, 1526668482349891784],
+        "leaders": [1526667442452168815, 1526667443454476328]
+    },
+    "air": {
+        "name": "الطيران",
+        "role_id": 1534969565933600818,
+        "channels": [1526668531486163135, 1526668535634460813],
+        "leaders": [1526667445450838046, 1526667446503608341, 1526667447590191104]
+    }
+}
+
+weekly_audit_counter = 1
+monthly_audit_counter = 1
+
 # -------------------------------------------------------------------------------------
 
-MAIN_GUILD_ID = 1441066070461911193        
+MAIN_GUILD_ID = 1441066070461911193       
 SECONDARY_GUILD_ID = 1526667305017413643  
 
 ROLE_MAPPING = {
@@ -75,17 +102,15 @@ ROLE_MAPPING = {
     1441072529111519353: 1526667549956116642,
 }
 
-# تم إضافة الروم الجديدة 1526668577971765449 هنا أيضاً ضمن القنوات المقروءة للضباط والوحدة (مع تحديد قيمة النقاط افتراضياً بـ 2 أو حسب رغبتك)
 OFFICER_CHANNELS = {
     1526668339391365170: 2, 1526668345448075284: 2,
-    1526668348262187188: 2, 1526668342444949696: 4,
-    1526668577971765449: 2
+    1526668348262187188: 2, 1526668342444949696: 4
 }
 
 ARREST_CHANNELS = {
     1526668398719926362: 6, 1526668402947653823: 8,
     1526668405619560468: 5, 1526668409046171699: 4,
-    1526668395406430308: 4, 1526668577971765449: 5
+    1526668395406430308: 4
 }
 
 active_sessions = {}
@@ -102,6 +127,18 @@ def has_summon_permission(interaction: discord.Interaction) -> bool:
         return True
     user_role_ids = [role.id for role in interaction.user.roles]
     return SUMMON_ALLOWED_ROLE_ID in user_role_ids
+
+def has_squad_audit_permission(interaction: discord.Interaction) -> bool:
+    if interaction.user.guild_permissions.administrator:
+        return True
+    user_role_ids = [role.id for role in interaction.user.roles]
+    return any(role_id in user_role_ids for role_id in SQUAD_AUDIT_ROLES)
+
+def get_role_members_mentions(guild: discord.Guild, role_id: int) -> str:
+    role = guild.get_role(role_id)
+    if role and role.members:
+        return " ".join([m.mention for m in role.members])
+    return "لا يوجد"
 
 async def send_custom_log(title: str, description: str, color=discord.Color.blue()):
     try:
@@ -450,7 +487,7 @@ class SummonChoiceView(discord.ui.View):
             return
 
         embed = discord.Embed(
-            title="🏛️ وزارة العدل • النيابة العامة | بـلاغ اسـتدعـاء رسـمي",
+            title="🏛️ الجمهورية • النيابة العامة | بـلاغ اسـتدعـاء رسـمي",
             color=color,
             timestamp=datetime.datetime.now(datetime.timezone.utc)
         )
@@ -471,7 +508,7 @@ class SummonChoiceView(discord.ui.View):
         
         embed.set_image(url=SUMMON_IMAGE_URL)
         icon_url = interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None
-        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق الإداري", icon_url=icon_url)
+        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق القضائي", icon_url=icon_url)
 
         await target_channel.send(content="||@everyone|| ||@here||", embed=embed)
         
@@ -480,7 +517,160 @@ class SummonChoiceView(discord.ui.View):
 
         await interaction.edit_original_response(content="✅ **تم إصدار البلاغ القضائي وتوثيقه وإرساله إلى القناة المخصصة بنجاح تام!**", view=None)
 
-# أوامر السلاش
+# ------------------------------- أوامر جرد الكتائب -------------------------------
+@bot.tree.command(name="جرد_الكتائب_الأسبوعي", description="إجراء جرد الكتائب الأسبوعي وإعلان الكتيبة الفائزة")
+async def weekly_squad_audit(interaction: discord.Interaction):
+    global weekly_audit_counter
+    if not has_squad_audit_permission(interaction):
+        await interaction.response.send_message("❌ عذراً، ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("✅ تم بدء جرد الكتائب الأسبوعي. سيتم إرسال البيان الأولي فوراً والبيان الختامي بعد 20 دقيقة.", ephemeral=True)
+
+    sig_mentions = get_role_members_mentions(interaction.guild, 1526957036561236141)
+
+    initial_msg = (
+        "**| ﷽ |\n\n"
+        "السلام عليكم ورحمة الله وبركاته .\n"
+        "والصلاة والسلام على أشرف الأنبياء والمرسلين .\n"
+        "أسعد الله أوقاتكم بكل خير .\n\n"
+        "تحية طيبة أما بعد :\n\n"
+        "بإسمنا نحن : <@&1526667439306178580> و <@&1526957036561236141> :__:  \n\n\n"
+        "بــيــان قــيـادي قــادم بــعــد قـلــيـل :949288975460339812: \n\n\n"
+        "`فـمـا يـخـص إعــلان كـتـيـبـة الــأسـبـوع `\n\n\n"
+        "سائلين الله التوفيق والسداد...\n\n\n"
+        "يبلغ أمرنا هذا للجهات المختصة فور صدوره :Verify: .\n\n"
+        "التوقيع :\n\n"
+        f"{sig_mentions}\n\n"
+        "[|| @everyone || -- || @here ||]**"
+    )
+    await interaction.channel.send(content=initial_msg)
+
+    # الانتظار 20 دقيقة (1200 ثانية)
+    await asyncio.sleep(1200)
+
+    start_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
+    squad_scores = {}
+
+    for s_key, s_info in SQUADS_DATA.items():
+        total_msgs = 0
+        for cid in s_info["channels"]:
+            ch = bot.get_channel(cid)
+            if ch:
+                async for msg in ch.history(after=start_date, limit=None):
+                    if not msg.author.bot:
+                        total_msgs += 1
+        squad_scores[s_key] = total_msgs
+
+    winner_key = max(squad_scores, key=squad_scores.get)
+    winner_info = SQUADS_DATA[winner_key]
+    winner_points = squad_scores[winner_key]
+
+    leaders_mentions = " ".join([f"<@&{lid}>" for lid in winner_info["leaders"]])
+    current_date = datetime.datetime.now().strftime("%Y/%m/%d")
+
+    final_msg = (
+        "**| ﷽ |\n\n\n"
+        f"الرقم: ({weekly_audit_counter})\n"
+        f"التاريخ: ({current_date})\n\n"
+        "السلام عليكم ورحمة الله وبركاته .\n"
+        "والصلاة والسلام على أشرف الأنبياء والمرسلين .\n"
+        "أسعد الله أوقاتكم بكل خير .\n\n"
+        "تحية طيبة أما بعد :\n\n"
+        "يسرنا نحن وبأسمنا : <@&1526667439306178580> و <@&1526957036561236141> :__:  \n\n\n"
+        "الإعلان عن جرد الكتائب الأسبوعي :12890279932719310631: :12890279932719310631::12890279932719310631::12890279932719310631::12890279932719310631::12890279932719310631::12890279932719310631:\n\n\n"
+        "بعد الإطلاع علئ جرد الكتائب كافة وأدائهم خلال الأسبوع الحالي يُقرر ما يلي  :utility_bottompage::utility_bottompage::utility_bottompage::\n\n\n"
+        f"تُنصب كتيبة الأسبوع وهي : <@&{winner_info['role_id']}> :_____831: :fire1: .\n\n"
+        "الحاصلين على رتبة : <@&1534965674840035419>\n\n\n"
+        f"وذلك بمعدل : ({winner_points}) نقطة :fire_CR: :fogo: .\n\n\n"
+        f"مع كامل الشكر لـــ ({leaders_mentions})\n\n\n\n\n"
+        "مُبارك لهم هذا التميز ونسأل الله لهم التوفيق والسداد في إدا مهامهم .\n\n\n"
+        "ويُبلَّغ أمرنا هذا إلى جميع الجهات المعنية لاعتماده والعمل بموجبه من تاريخ صدوره . :AL3DL~1: \n\n"
+        "والله ولي التوفيق .\n\n"
+        "التوقيع :\n\n"
+        f"{sig_mentions}\n\n"
+        "[|| @everyone || -- || @here ||]**"
+    )
+    weekly_audit_counter += 1
+    await interaction.channel.send(content=final_msg)
+
+@bot.tree.command(name="جرد_الكتائب_الشهري", description="إجراء جرد الكتائب الشهري وإعلان كتيبة الشهر")
+async def monthly_squad_audit(interaction: discord.Interaction):
+    global monthly_audit_counter
+    if not has_squad_audit_permission(interaction):
+        await interaction.response.send_message("❌ عذراً، ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("✅ تم بدء جرد الكتائب الشهري. سيتم إرسال البيان الأولي فوراً والبيان الختامي بعد 20 دقيقة.", ephemeral=True)
+
+    sig_mentions = get_role_members_mentions(interaction.guild, 1526957036561236141)
+
+    initial_msg = (
+        "**| ﷽ |\n\n"
+        "السلام عليكم ورحمة الله وبركاته .\n"
+        "والصلاة والسلام على أشرف الأنبياء والمرسلين .\n"
+        "أسعد الله أوقاتكم بكل خير .\n\n"
+        "تحية طيبة أما بعد :\n\n"
+        "بإسمنا نحن : <@&1526667439306178580> و <@&1526957036561236141> :__:  \n\n\n"
+        "بــيــان قــيـادي قــادم بــعــد قـلــيـل :949288975460339812: \n\n\n"
+        "`فـمـا يـخـص إعــلان كـتـيـبـة الــشـهـر `\n\n\n"
+        "سائلين الله التوفيق والسداد...\n\n\n"
+        "يبلغ أمرنا هذا للجهات المختصة فور صدوره :Verify: .\n\n"
+        "التوقيع :\n\n"
+        f"{sig_mentions}\n\n"
+        "[|| @everyone || -- || @here ||]**"
+    )
+    await interaction.channel.send(content=initial_msg)
+
+    # الانتظار 20 دقيقة
+    await asyncio.sleep(1200)
+
+    start_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)
+    squad_scores = {}
+
+    for s_key, s_info in SQUADS_DATA.items():
+        total_msgs = 0
+        for cid in s_info["channels"]:
+            ch = bot.get_channel(cid)
+            if ch:
+                async for msg in ch.history(after=start_date, limit=None):
+                    if not msg.author.bot:
+                        total_msgs += 1
+        squad_scores[s_key] = total_msgs
+
+    winner_key = max(squad_scores, key=squad_scores.get)
+    winner_info = SQUADS_DATA[winner_key]
+    winner_points = squad_scores[winner_key]
+
+    leaders_mentions = " ".join([f"<@&{lid}>" for lid in winner_info["leaders"]])
+    current_date = datetime.datetime.now().strftime("%Y/%m/%d")
+
+    final_msg = (
+        "**| ﷽ |\n\n\n"
+        f"الرقم: ({monthly_audit_counter})\n"
+        f"التاريخ: ({current_date})\n\n"
+        "السلام عليكم ورحمة الله وبركاته .\n"
+        "والصلاة والسلام على أشرف الأنبياء والمرسلين .\n"
+        "أسعد الله أوقاتكم بكل خير .\n\n"
+        "تحية طيبة أما بعد :\n\n"
+        "يسرنا نحن وبأسمنا : <@&1526667439306178580> و <@&1526957036561236141> :__:  \n\n\n"
+        "الإعلان عن جرد الكتائب الشهري :12890279932719310631: :12890279932719310631::12890279932719310631::12890279932719310631::12890279932719310631::12890279932719310631::12890279932719310631:\n\n\n"
+        "بعد الإطلاع علئ جرد الكتائب كافة وأدائهم خلال الشهر الحالي يُقرر ما يلي  :utility_bottompage::utility_bottompage::utility_bottompage::\n\n\n"
+        f"تُنصب كتيبة الشهر وهي : <@&{winner_info['role_id']}> :_____831: :fire1: .\n\n"
+        "الحاصلين على رتبة : <@&1526667494901809202>\n\n\n"
+        f"وذلك بمعدل : ({winner_points}) نقطة :fire_CR: :fogo: .\n\n\n"
+        f"مع كامل الشكر لـــ ({leaders_mentions})\n\n\n\n\n"
+        "مُبارك لهم هذا التميز ونسأل الله لهم التوفيق والسداد في إدا مهامهم .\n\n\n"
+        "ويُبلَّغ أمرنا هذا إلى جميع الجهات المعنية لاعتماده والعمل بموجبه من تاريخ صدوره . :AL3DL~1: \n\n"
+        "والله ولي التوفيق .\n\n"
+        "التوقيع :\n\n"
+        f"{sig_mentions}\n\n"
+        "[|| @everyone || -- || @here ||]**"
+    )
+    monthly_audit_counter += 1
+    await interaction.channel.send(content=final_msg)
+
+# باقي أوامر السلاش
 @bot.tree.command(name="ألصقه_استدعاء", description="إصدار استدعاء رسمي عبر المحادثة التفاعلية خطوة بخطوة")
 async def paste_summon(interaction: discord.Interaction):
     if not has_summon_permission(interaction):
@@ -509,7 +699,7 @@ class StopInvestigationModal(discord.ui.Modal, title="رفع التحقيق وإ
             return
 
         embed = discord.Embed(
-            title="🏛️ وزارة العدل • النيابة العامة | قـرار رفـع الإيقـاف",
+            title="🏛️ الجمهورية • النيابة العامة | قـرار رفـع الإيقـاف",
             color=discord.Color.green(),
             timestamp=datetime.datetime.now(datetime.timezone.utc)
         )
@@ -528,7 +718,7 @@ class StopInvestigationModal(discord.ui.Modal, title="رفع التحقيق وإ
         
         embed.set_image(url=SUMMON_IMAGE_URL)
         icon_url = interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None
-        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق الأداري", icon_url=icon_url)
+        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق القضائي", icon_url=icon_url)
 
         await target_channel.send(content="||@everyone|| ||@here||", embed=embed)
         await interaction.followup.send("✅ **تم إصدار وتوثيق قرار رفع التحقيق وإعادة العضو للعمل بنجاح!**", ephemeral=True)
@@ -594,6 +784,11 @@ async def check_officers(interaction: discord.Interaction):
     embed_result = format_report_as_embed("ترتيب الضباط (حسب الصور)", stats, interaction.guild, "نقطة")
     await interaction.followup.send(embed=embed_result)
 
+    # إرسال نسخة إلى قناة اللوق الإضافية
+    extra_log_ch = bot.get_channel(EXTRA_AUDIT_LOG_CHANNEL_ID)
+    if extra_log_ch:
+        await extra_log_ch.send(embed=embed_result)
+
 @bot.tree.command(name="check_arrests", description="جرد نقاط القبض")
 @app_commands.checks.has_any_role(*UNIT_ALLOWED_ROLES)
 async def check_arrests(interaction: discord.Interaction):
@@ -614,6 +809,11 @@ async def check_arrests(interaction: discord.Interaction):
                     
     embed_result = format_report_as_embed("ترتيب القبض (حسب المنشن)", stats, interaction.guild, "نقطة", discord.Color.red())
     await interaction.followup.send(embed=embed_result)
+
+    # إرسال نسخة إلى قناة اللوق الإضافية
+    extra_log_ch = bot.get_channel(EXTRA_AUDIT_LOG_CHANNEL_ID)
+    if extra_log_ch:
+        await extra_log_ch.send(embed=embed_result)
 
 @bot.tree.command(name="mentions", description="حساب عدد المنشنات المرسلة في فترة محددة")
 @app_commands.checks.has_role(MENTIONS_COUNT_ALLOWED_ROLE)
@@ -668,8 +868,163 @@ async def count(
             stats[msg.author.id] = stats.get(msg.author.id, 0) + 1
 
     report_title = f"رسائل قناة #{interaction.channel.name} ({start_day}/{start_month} - {end_day}/{end_month})"
-    embed_result = format_report_as_embed(report_title, stats, interaction.guild, "رسالة", discord.Color.purple())
+    embed_result = format_report_as_embed(report_title, stats, interaction.guild, "رسالة", discord.Color.green())
     await interaction.followup.send(embed=embed_result)
 
-# ضع التوكن الخاص بك هنا لتشغيل البوت
-bot.run("YOUR_BOT_TOKEN")
+@bot.tree.command(name="الجرد_الأسبوعي", description="يجرد معدل الدخول والخروج للأسبوع الماضي")
+@app_commands.checks.has_role(ADMIN_ROLE_ID)
+async def weekly_audit(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    last_week = now - datetime.timedelta(days=7)
+    users_stats = {}
+    for record in attendance_history:
+        if record["logout"] >= last_week:
+            uid = record["user_id"]
+            users_stats[uid] = users_stats.get(uid, 0) + (record["logout"] - record["login"]).total_seconds()
+            
+    embed = discord.Embed(title="📊 الجرد الأسبوعي للمحامين", color=discord.Color.dark_blue())
+    if not users_stats:
+        embed.description = "لا توجد بيانات للأسبوع الماضي."
+        await interaction.followup.send(embed=embed)
+        return
+
+    desc = ""
+    for uid, seconds in sorted(users_stats.items(), key=lambda x: x[1], reverse=True):
+        member = interaction.guild.get_member(uid)
+        name = member.mention if member else f"ID: {uid}"
+        desc += f"👤 {name}\n⏳ إجمالي الوقت: **{round(seconds / 3600, 2)} ساعة**\n\n"
+
+    embed.description = desc
+    await interaction.followup.send(embed=embed)
+
+@bot.tree.command(name="الإحصائيات_اليومية", description="قائمة بكل شخص سجل دخول وخروج اليوم")
+@app_commands.checks.has_role(ADMIN_ROLE_ID)
+async def daily_stats(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    embed = discord.Embed(title="📅 إحصائيات اليوم الحالي", color=discord.Color.teal())
+    desc = ""
+    found = False
+    
+    for record in attendance_history:
+        if record["login"] >= today_start or record["logout"] >= today_start:
+            found = True
+            member = interaction.guild.get_member(record["user_id"])
+            name = member.mention if member else f"ID: {record['user_id']}"
+            t_in = record["login"].strftime("%H:%M")
+            t_out = record["logout"].strftime("%H:%M")
+            desc += f"👤 {name}\n📥 الدخول: `{t_in}`\n📤 الخروج: `{t_out}`\n\n"
+            
+    if not found:
+        desc = "لم يقم أحد بتسجيل الدخول أو الخروج اليوم."
+        
+    embed.description = desc
+    await interaction.followup.send(embed=embed)
+
+@bot.tree.command(name="قائمة_المتصدرين_الشهرية", description="أكثر الأشخاص تفاعلاً خلال آخر شهر")
+@app_commands.checks.has_role(ADMIN_ROLE_ID)
+async def monthly_leaderboard(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    last_month = now - datetime.timedelta(days=30)
+    users_stats = {}
+    for record in attendance_history:
+        if record["logout"] >= last_month:
+            uid = record["user_id"]
+            users_stats[uid] = users_stats.get(uid, 0) + (record["logout"] - record["login"]).total_seconds()
+
+    embed = discord.Embed(title="🏆 قائمة المتصدرين الشهرية", color=discord.Color.gold())
+    if not users_stats:
+        embed.description = "لا توجد بيانات كافية."
+        await interaction.followup.send(embed=embed)
+        return
+
+    desc = ""
+    for rank, (uid, seconds) in enumerate(sorted(users_stats.items(), key=lambda x: x[1], reverse=True), 1):
+        member = interaction.guild.get_member(uid)
+        name = member.mention if member else f"ID: {uid}"
+        desc += f"**المركز {rank}** 🏅\n👤 {name}\n⏱️ **{round(seconds / 3600, 2)} ساعة**\n\n"
+
+    embed.description = desc
+    await interaction.followup.send(embed=embed)
+
+@bot.tree.command(name="قائمة_المتصدرين", description="أكثر الأشخاص تفاعلاً بشكل كامل")
+@app_commands.checks.has_role(ADMIN_ROLE_ID)
+async def all_time_leaderboard(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    users_stats = {}
+    for record in attendance_history:
+        uid = record["user_id"]
+        users_stats[uid] = users_stats.get(uid, 0) + (record["logout"] - record["login"]).total_seconds()
+
+    embed = discord.Embed(title="👑 قائمة المتصدرين الشاملة", color=discord.Color.purple())
+    if not users_stats:
+        embed.description = "لا توجد بيانات مسجلة بعد."
+        await interaction.followup.send(embed=embed)
+        return
+
+    desc = ""
+    for rank, (uid, seconds) in enumerate(sorted(users_stats.items(), key=lambda x: x[1], reverse=True), 1):
+        member = interaction.guild.get_member(uid)
+        name = member.mention if member else f"ID: {uid}"
+        desc += f"**المركز {rank}** 🌟\n👤 {name}\n⏱️ **{round(seconds / 3600, 2)} ساعة**\n\n"
+
+    embed.description = desc
+    await interaction.followup.send(embed=embed)
+
+@bot.tree.command(name="بدأ_فعالية", description="يبدأ احتساب الساعات لفعالية جديدة")
+@app_commands.checks.has_role(ADMIN_ROLE_ID)
+async def start_event(interaction: discord.Interaction):
+    event_data["is_active"] = True
+    event_data["start_time"] = datetime.datetime.now(datetime.timezone.utc)
+    embed = discord.Embed(title="✅ تم بدء الفعالية بنجاح!", description="سيتم الآن احتساب ساعات التفاعل بشكل منفصل حتى يتم إنهاء الفعالية.", color=discord.Color.green())
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="انهاء_الفعالية", description="ينهي الفعالية ويعرض قائمة المتصدرين الخاصة بها")
+@app_commands.checks.has_role(ADMIN_ROLE_ID)
+async def end_event(interaction: discord.Interaction):
+    if not event_data["is_active"]:
+        await interaction.response.send_message("⚠️ لا توجد فعالية نشطة حالياً لإنهائها.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    start_time = event_data["start_time"]
+    users_stats = {}
+    for record in attendance_history:
+        if record["logout"] >= start_time:
+            uid = record["user_id"]
+            log_start = max(record["login"], start_time)
+            users_stats[uid] = users_stats.get(uid, 0) + (record["logout"] - log_start).total_seconds()
+
+    embed = discord.Embed(title="🎉 نتائج الفعالية الخاصة", color=discord.Color.magenta())
+    if not users_stats:
+        embed.description = "انتهت الفعالية ولم يقم أحد بتسجيل الدخول خلالها."
+    else:
+        desc = ""
+        for rank, (uid, seconds) in enumerate(sorted(users_stats.items(), key=lambda x: x[1], reverse=True), 1):
+            member = interaction.guild.get_member(uid)
+            name = member.mention if member else f"ID: {uid}"
+            desc += f"**المركز {rank}** 🎁\n👤 {name}\n⏱️ **{round(seconds / 3600, 2)} ساعة**\n\n"
+        embed.description = desc
+
+    event_data["is_active"] = False
+    event_data["start_time"] = None
+    await interaction.followup.send(embed=embed)
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, (app_commands.errors.MissingRole, app_commands.errors.MissingAnyRole)):
+        msg = "ليس لديك الصلاحية لاستخدام هذا الأمر."
+        if not interaction.response.is_done():
+            await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
+        else:
+            await interaction.followup.send(f"❌ {msg}", ephemeral=True)
+    else:
+        if not interaction.response.is_done():
+            await interaction.response.send_message("❌ حدث خطأ أثناء تنفيذ الأمر.", ephemeral=True)
+        else:
+            await interaction.followup.send("❌ حدث خطأ أثناء تنفيذ الأمر.", ephemeral=True)
+
+bot.run(os.getenv('TOKEN'))
