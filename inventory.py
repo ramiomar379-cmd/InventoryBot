@@ -90,6 +90,7 @@ attendance_history = []
 event_data = {"is_active": False, "start_time": None}
 
 IMAGE_URL = "https://media.discordapp.net/attachments/1151101245537386609/1472578282963865670/Screenshot_7.png?ex=6a748565&is=6a7333e5&hm=cbe205704e37d40df6e535912e57cb27353d9305f879b2efd12961d384bac3b0&=&format=webp&quality=lossless&width=1280&height=281"
+DIVIDER_GIF_URL = "https://media.discordapp.net/attachments/1522904957391474759/1534717039459962950/49c865eae934de94.gif?ex=6a75241f&is=6a73d29f&hm=07f1d554361b2b891e6a4b4ed47f260cd92fbdc34cb7b811cc887e59f0928b18&="
 # ----------------------------------------------------------------
 
 def has_role(interaction: discord.Interaction, allowed_roles: list) -> bool:
@@ -128,13 +129,14 @@ async def send_sync_log(text: str):
     except Exception as e:
         print(f"❌ خطأ في إرسال لوق المُزامنة: {e}")
 
-# دالة إرسال لوق ورقة الحضور
+# دالة إرسال لوق ورقة الحضور (مع إرسال الـ GIF الفاصل تلقائياً)
 async def send_attendance_log(text: str, color=discord.Color.green()):
     try:
         log_channel = bot.get_channel(LOG_ATTENDANCE_CHANNEL_ID)
         if log_channel:
             embed = discord.Embed(title="📋 لوق ورقة الحضور", description=text, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
             await log_channel.send(embed=embed)
+            await log_channel.send(DIVIDER_GIF_URL)
     except Exception as e:
         print(f"❌ خطأ في إرسال لوق ورقة الحضور: {e}")
 
@@ -364,7 +366,7 @@ async def check_officers(interaction: discord.Interaction):
                     
     embed_result = format_report_as_embed("ترتيب الضباط (حسب الصور)", stats, interaction.guild, "نقطة")
     await interaction.edit_original_response(content=None, embed=embed_result)
-    await send_slash_log(interaction, f"تم جرد نقاط الضباط بنجاح وعرض القائمة.", is_success=True)
+    await send_slash_log(interaction, "تم جرد نقاط الضباط بنجاح وعرض القائمة.", is_success=True)
 
 @bot.tree.command(name="check_arrests", description="جرد نقاط القبض")
 @app_commands.checks.has_any_role(*UNIT_ALLOWED_ROLES)
@@ -424,7 +426,7 @@ async def mentions(
     report_title = f"منشنات قناة #{interaction.channel.name} ({start_day}/{start_month} - {end_day}/{end_month})"
     embed_result = format_report_as_embed(report_title, stats, interaction.guild, "منشن", discord.Color.orange())
     await interaction.edit_original_response(content=None, embed=embed_result)
-    await send_slash_log(interaction, f"تم حساب المنشنات بنجاح للفترة المحددة.", is_success=True)
+    await send_slash_log(interaction, "تم حساب المنشنات بنجاح للفترة المحددة.", is_success=True)
 
 @bot.tree.command(name="count", description="حساب عدد الرسائل لكل شخص في فترة محددة")
 @app_commands.checks.has_role(MENTIONS_COUNT_ALLOWED_ROLE)
@@ -492,7 +494,7 @@ async def weekly_audit(interaction: discord.Interaction):
 
     embed.description = desc
     await interaction.response.send_message(embed=embed)
-    await send_slash_log(interaction, "تم إرسال والجرد الأسبوعي بنجاح.", is_success=True)
+    await send_slash_log(interaction, "تم إرسال الجرد الأسبوعي بنجاح.", is_success=True)
 
 @bot.tree.command(name="الإحصائيات_اليومية", description="قائمة بكل شخص سجل دخول وخروج اليوم")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
