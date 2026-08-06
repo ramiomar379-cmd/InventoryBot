@@ -102,7 +102,8 @@ async def send_slash_log(interaction: discord.Interaction, result_text: str, is_
             status_title = "✅ تنفيذ أمر سلاش بنجاح" if is_success else "⚠️ فشل أو رفض أمر سلاش"
             embed = discord.Embed(title=status_title, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
             embed.add_field(name="👤 العضو", value=f"{interaction.user.mention} (`{interaction.user.id}`)", inline=False)
-            embed.add_field(name="🛠️ الأمر", value=f"/{interaction.command.name if interaction.command else 'Unknown'}", inline=True)
+            cmd_name = interaction.command.name if interaction.command else 'Unknown'
+            embed.add_field(name="🛠️ الأمر", value=f"/{cmd_name}", inline=True)
             embed.add_field(name="📍 الروم", value=f"{interaction.channel.mention if interaction.channel else 'Unknown'}", inline=True)
             embed.add_field(name="💬 الرد / النتيجة الصادرة", value=f"```{result_text[:1000]}```", inline=False)
             await log_channel.send(embed=embed)
@@ -296,16 +297,26 @@ class SummonModal(discord.ui.Modal, title="إصدار استدعاء رسمي �
     summoned_role_id = discord.ui.TextInput(label="أيدي رتبة المستدعَى (Role ID)", placeholder="أيدي رتبة الشخص...", required=True)
 
     async def on_submit(self, interaction: discord.Interaction):
-        view = SummonActionView(
-            target_user_id=self.target_user_id.value,
-            reason=self.reason.value,
-            officer_id=self.officer_id.value,
-            meeting_link=self.meeting_link.value,
-            officer_role_id=self.officer_role_id.value,
-            summoned_role_id=self.summoned_role_id.value,
-            author=interaction.user
-        )
-        await interaction.response.send_message("📌 **يرجى تحديد خيار إيقاف الصلاحيات أدناه لإتمام وإرسال الاستدعاء للقناة:**", view=view, ephemeral=True)
+        try:
+            view = SummonActionView(
+                target_user_id=self.target_user_id.value.strip(),
+                reason=self.reason.value.strip(),
+                officer_id=self.officer_id.value.strip(),
+                meeting_link=self.meeting_link.value.strip(),
+                officer_role_id=self.officer_role_id.value.strip(),
+                summoned_role_id=self.summoned_role_id.value.strip(),
+                author=interaction.user
+            )
+            await interaction.response.send_message("📌 **يرجى تحديد خيار إيقاف الصلاحيات أدناه لإتمام وإرسال الاستدعاء للقناة:**", view=view, ephemeral=True)
+        except Exception as e:
+            print(f"❌ خطأ في فتح نموذج الاستدعاء: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ حدث خطأ أثناء معالجة البيانات المدخلة.", ephemeral=True)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        print(f"❌ خطأ داخلي في SummonModal: {error}")
+        if not interaction.response.is_done():
+            await interaction.response.send_message("❌ حدث خطأ غير متوقع أثناء إرسال النافذة.", ephemeral=True)
 
 class SummonActionView(discord.ui.View):
     def __init__(self, target_user_id, reason, officer_id, meeting_link, officer_role_id, summoned_role_id, author):
@@ -326,37 +337,46 @@ class SummonActionView(discord.ui.View):
         ]
     )
     async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
-        await interaction.response.defer(ephemeral=True)
-        choice = select.values[0]
-        suspension_status = "🔒 **نعم・يُمنع من مباشرة العمل إلى أشعاراً آخر**" if choice == "yes" else "🔓 **لا・يستكمل عمله**"
+        try:
+            await interaction.response.defer(ephemeral=True)
+            choice = select.values[0]
+            suspension_status = "🔒 **نعم・يُمنع من مباشرة العمل إلى أشعاراً آخر**" if choice == "yes" else "🔓 **لا・يستكمل عمله**"
 
-        target_channel = interaction.guild.get_channel(SUMMON_TARGET_CHANNEL_ID)
-        if not target_channel:
-            await interaction.followup.send("❌ قناة إرسال الاستدعاء غير موجودة أو خطأ في الأيدي!", ephemeral=True)
-            return
+            target_channel = interaction.guild.get_channel(SUMMON_TARGET_CHANNEL_ID)
+            if not target_channel:
+                await interaction.followup.send("❌ قناة إرسال الاستدعاء غير موجودة أو خطأ في الأيدي!", ephemeral=True)
+                return
 
-        embed = discord.Embed(
-            title="⚖️ | بـلاغ اسـتدعـاء رسـمي - الـنيابـة العـامة",
-            color=discord.Color.dark_red() if choice == "yes" else discord.Color.gold(),
-            timestamp=datetime.datetime.now(datetime.timezone.utc)
-        )
-        embed.description = (
-            f"السلام عليكم ورحمة الله وبركاته،\n"
-            f"بناءً على المهام الرسمية، تقرر استدعاء العضو الموضح بياناته أدناه:\n\n"
-            f"👤 **المستدعَى:** <@{self.target_user_id}> (`{self.target_user_id}`)\n"
-            f"🎖️ **رتبة المستدعَى:** <@&{self.summoned_role_id}>\n\n"
-            f"📋 **الـسـبـب:**\n> {self.reason}\n\n"
-            f"🛡️ **المسؤول القائم بالاستدعاء:** <@{self.officer_id}> (`{self.officer_id}`)\n"
-            f"🎖️ **رتبة المسؤول:** <@&{self.officer_role_id}>\n\n"
-            f"⚡ **إيقاف الصلاحيات:** {suspension_status}\n\n"
-            f"🔗 **مكان الحضور:** [اضغط هنا للدخول والتوجّه]({self.meeting_link})\n"
-        )
-        embed.set_image(url=SUMMON_IMAGE_URL)
-        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق", icon_url=interaction.guild.icon.url if interaction.guild.icon else None)
+            embed = discord.Embed(
+                title="⚖️ | بـلاغ اسـتدعـاء رسـمي - الـنيابـة العـامة",
+                color=discord.Color.dark_red() if choice == "yes" else discord.Color.gold(),
+                timestamp=datetime.datetime.now(datetime.timezone.utc)
+            )
+            embed.description = (
+                f"السلام عليكم ورحمة الله وبركاته،\n"
+                f"بناءً على المهام الرسمية، تقرر استدعاء العضو الموضح بياناته أدناه:\n\n"
+                f"👤 **المستدعَى:** <@{self.target_user_id}> (`{self.target_user_id}`)\n"
+                f"🎖️ **رتبة المستدعَى:** <@&{self.summoned_role_id}>\n\n"
+                f"📋 **الـسـبـب:**\n> {self.reason}\n\n"
+                f"🛡️ **المسؤول القائم بالاستدعاء:** <@{self.officer_id}> (`{self.officer_id}`)\n"
+                f"🎖️ **رتبة المسؤول:** <@&{self.officer_role_id}>\n\n"
+                f"⚡ **إيقاف الصلاحيات:** {suspension_status}\n\n"
+                f"🔗 **مكان الحضور:** [اضغط هنا للدخول والتوجّه]({self.meeting_link})\n"
+            )
+            embed.set_image(url=SUMMON_IMAGE_URL)
+            
+            icon_url = interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None
+            embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق", icon_url=icon_url)
 
-        await target_channel.send(embed=embed)
-        await interaction.edit_original_response(content="✅ **تم إصدار وإرسال الاستدعاء الرسمي بنجاح وتوجيه البلاغ للقناة المخصصة!**", view=None)
-        await send_slash_log(interaction, f"تم إصدار استدعاء رسمي للعضو ID: `{self.target_user_id}` بواسطة المسؤول ID: `{self.officer_id}`", is_success=True)
+            await target_channel.send(embed=embed)
+            await interaction.edit_original_response(content="✅ **تم إصدار وإرسال الاستدعاء الرسمي بنجاح وتوجيه البلاغ للقناة المخصصة!**", view=None)
+            await send_slash_log(interaction, f"تم إصدار استدعاء رسمي للعضو ID: `{self.target_user_id}` بواسطة المسؤول ID: `{self.officer_id}`", is_success=True)
+        except Exception as e:
+            print(f"❌ خطأ أثناء تنفيذ Select Callback للاستدعاء: {e}")
+            try:
+                await interaction.followup.send("❌ حدث خطأ أثناء إرسال الاستدعاء للقناة. تأكد من صحة الأيدي المدخلة.", ephemeral=True)
+            except:
+                pass
 
 class StopInvestigationModal(discord.ui.Modal, title="إيقاف التحقيق وإعادة العضو للخدمة ⚖️"):
     target_user_id = discord.ui.TextInput(label="أيدي العضو المراد إنهاء إيقافه (User ID)", placeholder="مثال: 1521418837378072656", required=True)
@@ -376,21 +396,21 @@ class StopInvestigationModal(discord.ui.Modal, title="إيقاف التحقيق 
             color=discord.Color.green(),
             timestamp=datetime.datetime.now(datetime.timezone.utc)
         )
-        # تم تصحيح صياغة الـ description لتفادي ظهور رموز غير مقروءة أو تداخل في المنشنات
         embed.description = (
             f"إلى من يهمه الأمر، تقرر رسمياً رفع وإيقاف إجراءات التحقيق وإعادة العضو المذكور إلى ممارسة مهام عمله الطبيعية:\n\n"
-            f"👤 **العضو المعني:** <@{self.target_user_id}> (`{self.target_user_id}`)\n\n"
-            f"📋 **الـسـبـب / التفاصيل:**\n> {self.reason}\n\n"
-            f"🛡️ **المسؤول القائم بالقرار:** <@{self.officer_id}> (`{self.officer_id}`)\n"
-            f"🎖️ **رتبة المسؤول:** <@&{self.officer_role_id}>\n\n"
+            f"👤 **العضو المعني:** <@{self.target_user_id.value.strip()}> (`{self.target_user_id.value.strip()}`)\n\n"
+            f"📋 **الـسـبـب / التفاصيل:**\n> {self.reason.value.strip()}\n\n"
+            f"🛡️ **المسؤول القائم بالقرار:** <@{self.officer_id.value.strip()}> (`{self.officer_id.value.strip()}`)\n"
+            f"🎖️ **رتبة المسؤول:** <@&{self.officer_role_id.value.strip()}>\n\n"
             f"✨ **الحالة الحالية:** تم استئناف الصلاحيات والعودة للعمل بنجاح تام."
         )
         embed.set_image(url=SUMMON_IMAGE_URL)
-        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق", icon_url=interaction.guild.icon.url if interaction.guild.icon else None)
+        icon_url = interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None
+        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق", icon_url=icon_url)
 
         await target_channel.send(embed=embed)
         await interaction.followup.send("✅ **تم إرسال قرار وقف التحقيق وإعادة العضو للخدمة بنجاح!**", ephemeral=True)
-        await send_slash_log(interaction, f"تم تنفيذ أمر /وقف_عنه_التحقيق للعضو ID: `{self.target_user_id}`", is_success=True)
+        await send_slash_log(interaction, f"تم تنفيذ أمر /وقف_عنه_التحقيق للعضو ID: `{self.target_user_id.value}`", is_success=True)
 
 # ----------------- أوامر السلاش -----------------
 @bot.tree.command(name="ألصقه_استدعاء", description="إصدار استدعاء رسمي وتوجيهه للقناة المخصصة")
