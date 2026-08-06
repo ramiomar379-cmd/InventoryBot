@@ -44,6 +44,7 @@ LOG_SYNC_CHANNEL_ID = 1526668612398485584
 LOG_ATTENDANCE_CHANNEL_ID = 1534711951144390806    
 LOG_ID_COMMAND_CHANNEL_ID = 1534715397570560071    
 SUMMON_TARGET_CHANNEL_ID = 1534729850160545942
+GENERAL_CUSTOM_LOG_ID = 1534943475945177338 
 
 OFFICERS_AUDIT_CHANNEL_ID = 1526668727657955418
 OFFICERS_ALLOWED_ROLES = [
@@ -94,6 +95,15 @@ def has_summon_permission(interaction: discord.Interaction) -> bool:
     user_role_ids = [role.id for role in interaction.user.roles]
     return SUMMON_ALLOWED_ROLE_ID in user_role_ids
 
+async def send_custom_log(title: str, description: str, color=discord.Color.blue()):
+    try:
+        log_channel = bot.get_channel(GENERAL_CUSTOM_LOG_ID)
+        if log_channel:
+            embed = discord.Embed(title=title, description=description, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
+            await log_channel.send(embed=embed)
+    except Exception as e:
+        print(f"❌ خطأ في إرسال لوق الأوامر الخاصة: {e}")
+
 async def send_slash_log(interaction: discord.Interaction, result_text: str, is_success: bool = True):
     try:
         log_channel = bot.get_channel(LOG_SLASH_COMMANDS_CHANNEL_ID)
@@ -109,34 +119,6 @@ async def send_slash_log(interaction: discord.Interaction, result_text: str, is_
             await log_channel.send(embed=embed)
     except Exception as e:
         print(f"❌ خطأ في إرسال لوق أوامر السلاش: {e}")
-
-async def send_sync_log(text: str):
-    try:
-        log_channel = bot.get_channel(LOG_SYNC_CHANNEL_ID)
-        if log_channel:
-            embed = discord.Embed(title="🔄 لوق المُزامنة", description=text, color=discord.Color.purple(), timestamp=datetime.datetime.now(datetime.timezone.utc))
-            await log_channel.send(embed=embed)
-    except Exception as e:
-        print(f"❌ خطأ في إرسال لوق المُزامنة: {e}")
-
-async def send_attendance_log(text: str, color=discord.Color.green()):
-    try:
-        log_channel = bot.get_channel(LOG_ATTENDANCE_CHANNEL_ID)
-        if log_channel:
-            embed = discord.Embed(title="📋 لوق ورقة الحضور", description=text, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
-            await log_channel.send(embed=embed)
-            await log_channel.send(DIVIDER_GIF_URL)
-    except Exception as e:
-        print(f"❌ خطأ في إرسال لوق ورقة الحضور: {e}")
-
-async def send_id_log(text: str):
-    try:
-        log_channel = bot.get_channel(LOG_ID_COMMAND_CHANNEL_ID)
-        if log_channel:
-            embed = discord.Embed(title="🔍 لوق استخدام أمر id", description=text, color=discord.Color.blue(), timestamp=datetime.datetime.now(datetime.timezone.utc))
-            await log_channel.send(embed=embed)
-    except Exception as e:
-        print(f"❌ خطأ في إرسال لوق أمر id: {e}")
 
 async def sync_user_data(main_member: discord.Member, sec_member: discord.Member):
     changes = []
@@ -170,9 +152,6 @@ async def sync_user_data(main_member: discord.Member, sec_member: discord.Member
             await sec_member.add_roles(*roles_to_add)
         if roles_to_remove:
             await sec_member.remove_roles(*roles_to_remove)
-        if changes:
-            log_text = f"👤 العضو: {main_member.mention} (`{main_member.id}`)\n" + "\n".join(changes)
-            await send_sync_log(log_text)
     except Exception as e:
         print(f"❌ تعذر تحديث رتب العضو {sec_member}: {e}")
 
@@ -226,10 +205,6 @@ async def check_offline_status():
                         await member.send("⚠️ تم تسجيل خروجك تلقائياً من النظام بسبب بقائك في وضع (Offline) لأكثر من 10 دقائق.")
                     except Exception:
                         pass
-                    await send_attendance_log(f"⚠️ تسجيل خروج تلقائي (أوفلاين) للمحامي: {member.mention} (`{member.id}`)", discord.Color.orange())
-        else:
-            if user_id in offline_timers:
-                del offline_timers[user_id]
 
 @check_offline_status.before_loop
 async def before_check():
@@ -242,8 +217,8 @@ async def on_ready():
     check_offline_status.start()
     print(f"✅ تم تشغيل البوت بنجاح: {bot.user}")
 
-# نظام المحادثة خطوة بخطوة للاستدعاء
 summon_wizard_sessions = {}
+channel_previous_permissions = {}
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -255,7 +230,117 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # معالجة خطوات استطلاع الاستدعاء بالخاص أو الشات
+    # معالجة أمر قفل الروم ($سكر_عليهم_الروم_يامدير)
+    if message.content.strip() == "$سكر_عليهم_الروم_يامدير":
+        if not message.author.guild_permissions.administrator:
+            await message.reply("❌ عذراً، هذا الأمر مخصص فقط لمن يمتلك صلاحية الأدمنستريتور (Administrator).", delete_after=5)
+            return
+        
+        try:
+            await message.delete()
+            guild = message.guild
+            channel = message.channel
+            default_role = guild.default_role
+
+            allowed_roles_list = []
+            overwrite_dict = channel.overwrites
+
+            current_everyone_overwrite = channel.overwrites_for(default_role)
+            current_everyone_overwrite.send_messages = False
+            await channel.set_permissions(default_role, overwrite=current_everyone_overwrite)
+
+            for target, overwrite in overwrite_dict.items():
+                if isinstance(target, discord.Role) and target.id != default_role.id:
+                    if overwrite.send_messages is True or (overwrite.send_messages is None and target.permissions.send_messages):
+                        allowed_roles_list.append(target)
+                        new_ov = channel.overwrites_for(target)
+                        new_ov.send_messages = False
+                        await channel.set_permissions(target, overwrite=new_ov)
+
+            channel_previous_permissions[channel.id] = allowed_roles_list
+            roles_mention_str = " ".join([r.mention for r in allowed_roles_list]) if allowed_roles_list else "لا توجد رتب محددة"
+            
+            await channel.send(
+                "🔒 **تنبيه إداري رسمي:**\n\n"
+                "تم إغلاق هذه الروم نهائياً بأمر الإدارة العليا، ولا يحق لأي أحد الكتابة فيها حالياً.\n\n"
+                f"📌 **الرتب التي تم إغلاق الروم عليها وصلاحياتها:**\n{roles_mention_str}"
+            )
+
+            await send_custom_log(
+                title="🔒 إجراء قفل روم إداري",
+                description=f"👤 **المسؤول:** {message.author.mention} (`{message.author.id}`)\n\n"
+                            f"📍 **الروم:** {channel.mention} (`{channel.id}`)\n\n"
+                            f"🛡️ **الرتب التي أُغلقت عليها:**\n{roles_mention_str}",
+                color=discord.Color.dark_red()
+            )
+        except Exception as e:
+            print(f"خطأ في أمر القفل: {e}")
+        return
+
+    # معالجة أمر فتح الروم ($أفتح_عليهم_الروم_يامدير)
+    if message.content.strip() == "$أفتح_عليهم_الروم_يامدير":
+        if not message.author.guild_permissions.administrator:
+            await message.reply("❌ عذراً، هذا الأمر مخصص فقط لمن يمتلك صلاحية الأدمنستريتور (Administrator).", delete_after=5)
+            return
+        
+        try:
+            await message.delete()
+            guild = message.guild
+            channel = message.channel
+            default_role = guild.default_role
+
+            current_everyone_overwrite = channel.overwrites_for(default_role)
+            current_everyone_overwrite.send_messages = None
+            await channel.set_permissions(default_role, overwrite=current_everyone_overwrite)
+
+            previously_allowed = channel_previous_permissions.get(channel.id, [])
+            for role in previously_allowed:
+                ov = channel.overwrites_for(role)
+                ov.send_messages = True
+                await channel.set_permissions(role, overwrite=ov)
+
+            await channel.send(
+                "🔓 **تنبيه إداري رسمي:**\n\n"
+                "تم فتح هذه الروم وإعادة الصلاحيات للأشخاص والرتب التي تم إغلاق الروم عليهم مسبقاً. يمكنكم بدء الكتابة الآن."
+            )
+
+            await send_custom_log(
+                title="🔓 إجراء فتح روم إداري",
+                description=f"👤 **المسؤول:** {message.author.mention} (`{message.author.id}`)\n\n"
+                            f"📍 **الروم:** {channel.mention} (`{channel.id}`)",
+                color=discord.Color.green()
+            )
+        except Exception as e:
+            print(f"خطأ في أمر الفتح: {e}")
+        return
+
+    # معالجة أمر مسح الرسائل (!مسح الرسائل أو !مسح_الرسائل)
+    if message.content.strip().startswith("!مسح الرسائل") or message.content.strip().startswith("!مسح_الرسائل"):
+        if not message.author.guild_permissions.administrator:
+            await message.reply("❌ عذراً، هذا الأمر مخصص فقط للمشرفين والأدمنستريتور.", delete_after=5)
+            return
+        
+        parts = message.content.strip().split()
+        if len(parts) > 2:
+            try:
+                amount = int(parts[2])
+                if 1 <= amount <= 300:
+                    await message.delete()
+                    deleted = await message.channel.purge(limit=amount)
+                    
+                    await send_custom_log(
+                        title="🧹 عملية مسح رسائل",
+                        description=f"👤 **المسؤول:** {message.author.mention} (`{message.author.id}`)\n\n"
+                                    f"📍 **الروم:** {message.channel.mention} (`{message.channel.id}`)\n\n"
+                                    f"🗑️ **عدد الرسائل المحذوفة:** `{len(deleted)}` رسالة",
+                        color=discord.Color.orange()
+                    )
+                    return
+            except ValueError:
+                pass
+        await message.reply("❌ يرجى كتابة الرقم بشكل صحيح بين 1 إلى 300، هكذا: `!مسح الرسائل 50`", delete_after=5)
+        return
+
     if message.author.id in summon_wizard_sessions:
         session = summon_wizard_sessions[message.author.id]
         step = session["step"]
@@ -290,7 +375,6 @@ async def on_message(message: discord.Message):
             session["summoned_role_id"] = content
             session["step"] = 7
             
-            # خطوة اختيار إيقاف الصلاحيات عبر أزرار مضمونة 100%
             view = SummonChoiceView(session, message.author)
             await message.channel.send("📌 **اختر الآن هل يشمل الاستدعاء إيقاف الصلاحيات؟**", view=view)
             return
@@ -309,7 +393,6 @@ async def on_message(message: discord.Message):
             await message.channel.send(embed=embed)
             await message.channel.send(DIVIDER_GIF_URL)
             await message.delete()
-            await send_attendance_log(f"📥 تسجيل دخول المحامي: {message.author.mention} (`{message.author.id}`)", discord.Color.green())
 
         elif message.content.strip() == '-خ':
             if message.author.id in active_sessions:
@@ -325,31 +408,29 @@ async def on_message(message: discord.Message):
                 await message.channel.send(embed=embed)
                 await message.channel.send(DIVIDER_GIF_URL)
                 await message.delete()
-                duration = round((now - login_time).total_seconds() / 3600, 2)
-                await send_attendance_log(f"📤 تسجيل خروج المحامي: {message.author.mention} (`{message.author.id}`)\n⏱️ مدة الجلسة: **{duration} ساعة**", discord.Color.red())
 
     await bot.process_commands(message)
 
-# ----------------- أزرار خيار إيقاف الصلاحيات الآمنة -----------------
+# ----------------- أزرار خيار إيقاف الصلاحيات بتصميم رسمي ومهيب -----------------
 class SummonChoiceView(discord.ui.View):
     def __init__(self, session_data, author):
         super().__init__(timeout=300)
         self.session_data = session_data
         self.author = author
 
-    @discord.ui.button(label="نعم (يُمنع من العمل)", style=discord.ButtonStyle.danger, emoji="🔒")
+    @discord.ui.button(label="إيقاف الصلاحيات (يُمنع من العمل)", style=discord.ButtonStyle.danger, emoji="⚖️")
     async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.author.id:
             await interaction.response.send_message("❌ هذا ليس استدعاؤك!", ephemeral=True)
             return
-        await self.finalize_summon(interaction, "🔒 **نعم・يُمنع من مباشرة العمل إلى أشعاراً آخر**", discord.Color.dark_red())
+        await self.finalize_summon(interaction, "🔒 **محظور وموقوف من مباشرة المهام الرسمية حتى إشعار آخر.**", discord.Color.dark_red())
 
-    @discord.ui.button(label="لا (يستكمل عمله)", style=discord.ButtonStyle.success, emoji="🔓")
+    @discord.ui.button(label="استمرار بالعمل (بدون إيقاف)", style=discord.ButtonStyle.success, emoji="🛡️")
     async def no_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.author.id:
             await interaction.response.send_message("❌ هذا ليس استدعاؤك!", ephemeral=True)
             return
-        await self.finalize_summon(interaction, "🔓 **لا・يستكمل عمله**", discord.Color.gold())
+        await self.finalize_summon(interaction, "🔓 **مستمر في ممارسة مهامه الاعتيادية.**", discord.Color.gold())
 
     async def finalize_summon(self, interaction: discord.Interaction, suspension_status, color):
         await interaction.response.defer(ephemeral=True)
@@ -361,33 +442,37 @@ class SummonChoiceView(discord.ui.View):
             return
 
         embed = discord.Embed(
-            title="⚖️ | بـلاغ اسـتدعـاء رسـمي - الـنيابـة العـامة",
+            title="🏛️ الجمهورية • النيابة العامة | بـلاغ اسـتدعـاء رسـمي",
             color=color,
             timestamp=datetime.datetime.now(datetime.timezone.utc)
         )
+        
         embed.description = (
-            f"السلام عليكم ورحمة الله وبركاته،\n"
-            f"بناءً على المهام الرسمية، تقرر استدعاء العضو الموضح بياناته أدناه:\n\n"
-            f"👤 **المستدعَى:** <@{data['target_user_id']}> (`{data['target_user_id']}`)\n"
-            f"🎖️ **رتبة المستدعَى:** <@&{data['summoned_role_id']}>\n\n"
-            f"📋 **الـسـبـب:**\n> {data['reason']}\n\n"
-            f"🛡️ **المسؤول القائم بالاستدعاء:** <@{data['officer_id']}> (`{data['officer_id']}`)\n"
-            f"🎖️ **رتبة المسؤول:** <@&{data['officer_role_id']}>\n\n"
-            f"⚡ **إيقاف الصلاحيات:** {suspension_status}\n\n"
-            f"🔗 **مكان الحضور:** [اضغط هنا للدخول والتوجّه]({data['meeting_link']})\n"
+            "**بسم الله الرحمن الرحيم**\n\n"
+            "**السلام عليكم ورحمة الله وبركاته،**\n"
+            "**تحية طيبة وبعد،**\n\n"
+            "بناءً على الصلاحيات المخولة لنا، ولمقتضيات المصلحة العامة وسير العمل، تقرر استدعاء العضو الموضحة بياناته أدناه للمثول أمام الجهات المختصة.\n\n"
+            f"👤 **العضو المستدعَى:** <@{data['target_user_id']}> (`{data['target_user_id']}`)\n\n"
+            f"🎖️ **الرتبة المعنية:** <@&{data['summoned_role_id']}>\n\n"
+            f"📋 **سـبـب الاسـتدعـاء:**\n{data['reason']}\n\n"
+            f"🛡️ **المسؤول المُصدر للقرار:** <@{data['officer_id']}> (`{data['officer_id']}`)\n\n"
+            f"🎖️ **رتبة المسؤول التنفيذي:** <@&{data['officer_role_id']}>\n\n"
+            f"⚡ **حالة الصلاحيات التنفيذية:**\n{suspension_status}\n\n"
+            f"🔗 **رابط التوجه وحضور الجلسة:**\n[اضغط هنا للانتقال إلى مقر الحضور والاستماع]({data['meeting_link']})"
         )
+        
         embed.set_image(url=SUMMON_IMAGE_URL)
         icon_url = interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None
-        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق", icon_url=icon_url)
+        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق القضائي", icon_url=icon_url)
 
-        await target_channel.send(embed=embed)
+        await target_channel.send(content="||@everyone|| ||@here||", embed=embed)
         
         if interaction.user.id in summon_wizard_sessions:
             del summon_wizard_sessions[interaction.user.id]
 
-        await interaction.edit_original_response(content="✅ **تم إصدار وإرسال الاستدعاء الرسمي بنجاح وتوجيه البلاغ للقناة المخصصة!**", view=None)
+        await interaction.edit_original_response(content="✅ **تم إصدار البلاغ القضائي وتوثيقه وإرساله إلى القناة المخصصة بنجاح تام!**", view=None)
 
-# أوامر السلاش المعدلة
+# أوامر السلاش
 @bot.tree.command(name="ألصقه_استدعاء", description="إصدار استدعاء رسمي عبر المحادثة التفاعلية خطوة بخطوة")
 async def paste_summon(interaction: discord.Interaction):
     if not has_summon_permission(interaction):
@@ -398,13 +483,13 @@ async def paste_summon(interaction: discord.Interaction):
 
     summon_wizard_sessions[interaction.user.id] = {"step": 1}
     await interaction.response.send_message(
-        "⚖️ **بدء نظام الاستدعاء الرسمي:**\nالرجاء إرسال **أيدي الشخص المراد استدعاؤه (User ID)** في الرسالة القادمة:", 
+        "⚖️ **بدء نظام الاستدعاء القضائي الرسمي:**\nالرجاء إرسال **أيدي الشخص المراد استدعاؤه (User ID)** في الرسالة القادمة:", 
         ephemeral=True
     )
 
-class StopInvestigationModal(discord.ui.Modal, title="إيقاف التحقيق وإعادة العضو للخدمة ⚖️"):
-    target_user_id = discord.ui.TextInput(label="أيدي العضو المراد إنهاء إيقافه (User ID)", placeholder="مثال: 1521418837378072656", required=True)
-    reason = discord.ui.TextInput(label="سبب إيقاف التحقيق / إعادة الخدمة", placeholder="اكتب السبب هنا...", style=discord.TextStyle.paragraph, required=True)
+class StopInvestigationModal(discord.ui.Modal, title="رفع التحقيق وإعادة الاعتبار ⚖️"):
+    target_user_id = discord.ui.TextInput(label="أيدي العضو المعني (User ID)", placeholder="مثال: 1521418837378072656", required=True)
+    reason = discord.ui.TextInput(label="أسباب رفع الإيقاف والقرار الصادر", placeholder="اكتب التفاصيل القانونية هنا...", style=discord.TextStyle.paragraph, required=True)
     officer_id = discord.ui.TextInput(label="أيدي المسؤول (User ID)", placeholder="أيدي الخاص بك...", required=True)
     officer_role_id = discord.ui.TextInput(label="أيدي رتبة المسؤول (Role ID)", placeholder="أيدي رتبتك...", required=True)
 
@@ -416,24 +501,29 @@ class StopInvestigationModal(discord.ui.Modal, title="إيقاف التحقيق 
             return
 
         embed = discord.Embed(
-            title="⚖️ | قرار إيقاف التحقيق وإعادة للخدمة - النيابة العامة",
+            title="🏛️ الجمهورية • النيابة العامة | قـرار رفـع الإيقـاف",
             color=discord.Color.green(),
             timestamp=datetime.datetime.now(datetime.timezone.utc)
         )
+        
         embed.description = (
-            f"إلى من يهمه الأمر، تقرر رسمياً رفع وإيقاف إجراءات التحقيق وإعادة العضو المذكور إلى ممارسة مهام عمله الطبيعية:\n\n"
-            f"👤 **العضو المعني:** <@{self.target_user_id.value.strip()}> (`{self.target_user_id.value.strip()}`)\n\n"
-            f"📋 **الـسـبـب / التفاصيل:**\n> {self.reason.value.strip()}\n\n"
-            f"🛡️ **المسؤول القائم بالقرار:** <@{self.officer_id.value.strip()}> (`{self.officer_id.value.strip()}`)\n"
-            f"🎖️ **رتبة المسؤول:** <@&{self.officer_role_id.value.strip()}>\n\n"
-            f"✨ **الحالة الحالية:** تم استئناف الصلاحيات والعودة للعمل بنجاح تام."
+            "**بسم الله الرحمن الرحيم**\n\n"
+            "**السلام عليكم ورحمة الله وبركاته،**\n"
+            "**تحية طيبة وبعد،**\n\n"
+            "بناءً على مجريات التحقيق، وبعد مراجعة الحيثيات المتعلقة بالقرار السابق، تقرر رسمياً رفع الإيقاف وإعادة الاعتبار للعضو الموضحة بياناته أدناه.\n\n"
+            f"👤 **العضو المعني بالقرار:** <@{self.target_user_id.value.strip()}> (`{self.target_user_id.value.strip()}`)\n\n"
+            f"📋 **الحيثيات والأسباب:**\n{self.reason.value.strip()}\n\n"
+            f"🛡️ **المسؤول المُصدر للقرار:** <@{self.officer_id.value.strip()}> (`{self.officer_id.value.strip()}`)\n\n"
+            f"🎖️ **رتبة المسؤول التنفيذي:** <@&{self.officer_role_id.value.strip()}>\n\n"
+            "✨ **الحالة النظامية:**\nتم استئناف كافة الصلاحيات والعودة لممارسة مهام العمل بشكل رسمي."
         )
+        
         embed.set_image(url=SUMMON_IMAGE_URL)
         icon_url = interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None
-        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق", icon_url=icon_url)
+        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق القضائي", icon_url=icon_url)
 
-        await target_channel.send(embed=embed)
-        await interaction.followup.send("✅ **تم إرسال قرار وقف التحقيق وإعادة العضو للخدمة بنجاح!**", ephemeral=True)
+        await target_channel.send(content="||@everyone|| ||@here||", embed=embed)
+        await interaction.followup.send("✅ **تم إصدار وتوثيق قرار رفع التحقيق وإعادة العضو للعمل بنجاح!**", ephemeral=True)
         await send_slash_log(interaction, f"تم تنفيذ أمر /وقف_عنه_التحقيق للعضو ID: `{self.target_user_id.value}`", is_success=True)
 
 @bot.tree.command(name="وقف_عنه_التحقيق", description="إيقاف التحقيق وإعادة العضو للخدمة وصلاحياته")
@@ -458,10 +548,8 @@ async def id(ctx, *, name: str):
         embed.add_field(name="الاسم الكامل", value=member.mention, inline=True)
         embed.add_field(name="User ID", value=f"`{member.id}`", inline=True)
         await ctx.send(embed=embed)
-        await send_id_log(f"👤 المستخدم: {ctx.author.mention} (`{ctx.author.id}`)\n🔍 البحث عن: `{name}`\n✅ النتيجة: تم العثور على العضو {member.mention} (`{member.id}`)")
     else:
         await ctx.send(f"❌ لم يتم العثور على أي شخص باسم: `{name}`")
-        await send_id_log(f"👤 المستخدم: {ctx.author.mention} (`{ctx.author.id}`)\n🔍 البحث عن: `{name}`\n❌ النتيجة: لم يتم العثور على أي عضو بهذا الاسم.")
 
 def format_report_as_embed(title, stats, guild, unit_name="نقطة", color=discord.Color.blue()):
     embed = discord.Embed(title=f"📊 {title}", color=color)
@@ -473,7 +561,7 @@ def format_report_as_embed(title, stats, guild, unit_name="نقطة", color=disc
     for rank, (uid, count) in enumerate(sorted_data, 1):
         member = guild.get_member(uid)
         name_str = member.mention if member else f"ID: `{uid}`"
-        desc += f"`#{rank}` {name_str} ──── **{count}** {unit_name}\n\n"
+        desc += f"`#{rank}` {name_str}\nالرصيد: **{count}** {unit_name}\n\n"
     embed.description = desc
     return embed
 
@@ -483,7 +571,6 @@ async def check_officers(interaction: discord.Interaction):
     if interaction.channel_id != OFFICERS_AUDIT_CHANNEL_ID:
         msg = f"يمكن استخدام هذا الأمر فقط داخل الروم المخصصة: <#{OFFICERS_AUDIT_CHANNEL_ID}>"
         await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
-        await send_slash_log(interaction, msg, is_success=False)
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -498,7 +585,6 @@ async def check_officers(interaction: discord.Interaction):
                     
     embed_result = format_report_as_embed("ترتيب الضباط (حسب الصور)", stats, interaction.guild, "نقطة")
     await interaction.followup.send(embed=embed_result)
-    await send_slash_log(interaction, "تم جرد نقاط الضباط بنجاح وعرض القائمة.", is_success=True)
 
 @bot.tree.command(name="check_arrests", description="جرد نقاط القبض")
 @app_commands.checks.has_any_role(*UNIT_ALLOWED_ROLES)
@@ -506,7 +592,6 @@ async def check_arrests(interaction: discord.Interaction):
     if interaction.channel_id != UNIT_AUDIT_CHANNEL_ID:
         msg = f"يمكن استخدام هذا الأمر فقط داخل الروم المخصصة: <#{UNIT_AUDIT_CHANNEL_ID}>"
         await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
-        await send_slash_log(interaction, msg, is_success=False)
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -521,7 +606,6 @@ async def check_arrests(interaction: discord.Interaction):
                     
     embed_result = format_report_as_embed("ترتيب القبض (حسب المنشن)", stats, interaction.guild, "نقطة", discord.Color.red())
     await interaction.followup.send(embed=embed_result)
-    await send_slash_log(interaction, "تم جرد نقاط القبض بنجاح وعرض القائمة.", is_success=True)
 
 @bot.tree.command(name="mentions", description="حساب عدد المنشنات المرسلة في فترة محددة")
 @app_commands.checks.has_role(MENTIONS_COUNT_ALLOWED_ROLE)
@@ -538,9 +622,7 @@ async def mentions(
         start_date = datetime.datetime(start_year, start_month, start_day, 0, 0, 0, tzinfo=datetime.timezone.utc)
         end_date = datetime.datetime(end_year, end_month, end_day, 23, 59, 59, tzinfo=datetime.timezone.utc)
     except ValueError:
-        msg = "التاريخ الذي أدخلته غير صحيح!"
-        await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
-        await send_slash_log(interaction, msg, is_success=False)
+        await interaction.response.send_message("❌ التاريخ الذي أدخلته غير صحيح!", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -552,7 +634,6 @@ async def mentions(
     report_title = f"منشنات قناة #{interaction.channel.name} ({start_day}/{start_month} - {end_day}/{end_month})"
     embed_result = format_report_as_embed(report_title, stats, interaction.guild, "منشن", discord.Color.orange())
     await interaction.followup.send(embed=embed_result)
-    await send_slash_log(interaction, "تم حساب المنشنات بنجاح للفترة المحددة.", is_success=True)
 
 @bot.tree.command(name="count", description="حساب عدد الرسائل لكل شخص في فترة محددة")
 @app_commands.checks.has_role(MENTIONS_COUNT_ALLOWED_ROLE)
@@ -569,9 +650,7 @@ async def count(
         start_date = datetime.datetime(start_year, start_month, start_day, 0, 0, 0, tzinfo=datetime.timezone.utc)
         end_date = datetime.datetime(end_year, end_month, end_day, 23, 59, 59, tzinfo=datetime.timezone.utc)
     except ValueError:
-        msg = "التاريخ الذي أدخلته غير صحيح!"
-        await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
-        await send_slash_log(interaction, msg, is_success=False)
+        await interaction.response.send_message("❌ التاريخ الذي أدخلته غير صحيح!", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -583,7 +662,6 @@ async def count(
     report_title = f"رسائل قناة #{interaction.channel.name} ({start_day}/{start_month} - {end_day}/{end_month})"
     embed_result = format_report_as_embed(report_title, stats, interaction.guild, "رسالة", discord.Color.green())
     await interaction.followup.send(embed=embed_result)
-    await send_slash_log(interaction, "تم حساب عدد الرسائل بنجاح.", is_success=True)
 
 @bot.tree.command(name="الجرد_الأسبوعي", description="يجرد معدل الدخول والخروج للأسبوع الماضي")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
@@ -611,7 +689,6 @@ async def weekly_audit(interaction: discord.Interaction):
 
     embed.description = desc
     await interaction.followup.send(embed=embed)
-    await send_slash_log(interaction, "تم إرسال الجرد الأسبوعي بنجاح.", is_success=True)
 
 @bot.tree.command(name="الإحصائيات_اليومية", description="قائمة بكل شخص سجل دخول وخروج اليوم")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
@@ -637,7 +714,6 @@ async def daily_stats(interaction: discord.Interaction):
         
     embed.description = desc
     await interaction.followup.send(embed=embed)
-    await send_slash_log(interaction, "تم عرض الإحصائيات اليومية بنجاح.", is_success=True)
 
 @bot.tree.command(name="قائمة_المتصدرين_الشهرية", description="أكثر الأشخاص تفاعلاً خلال آخر شهر")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
@@ -665,7 +741,6 @@ async def monthly_leaderboard(interaction: discord.Interaction):
 
     embed.description = desc
     await interaction.followup.send(embed=embed)
-    await send_slash_log(interaction, "تم عرض قائمة المتصدرين الشهرية بنجاح.", is_success=True)
 
 @bot.tree.command(name="قائمة_المتصدرين", description="أكثر الأشخاص تفاعلاً بشكل كامل")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
@@ -690,7 +765,6 @@ async def all_time_leaderboard(interaction: discord.Interaction):
 
     embed.description = desc
     await interaction.followup.send(embed=embed)
-    await send_slash_log(interaction, "تم عرض قائمة المتصدرين الشاملة بنجاح.", is_success=True)
 
 @bot.tree.command(name="بدأ_فعالية", description="يبدأ احتساب الساعات لفعالية جديدة")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
@@ -699,14 +773,12 @@ async def start_event(interaction: discord.Interaction):
     event_data["start_time"] = datetime.datetime.now(datetime.timezone.utc)
     embed = discord.Embed(title="✅ تم بدء الفعالية بنجاح!", description="سيتم الآن احتساب ساعات التفاعل بشكل منفصل حتى يتم إنهاء الفعالية.", color=discord.Color.green())
     await interaction.response.send_message(embed=embed, ephemeral=True)
-    await send_slash_log(interaction, "تم بدء الفعالية بنجاح.", is_success=True)
 
 @bot.tree.command(name="انهاء_الفعالية", description="ينهي الفعالية ويعرض قائمة المتصدرين الخاصة بها")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def end_event(interaction: discord.Interaction):
     if not event_data["is_active"]:
-        msg = "لا توجد فعالية نشطة حالياً لإنهائها."
-        await interaction.response.send_message(f"⚠️ {msg}", ephemeral=True)
+        await interaction.response.send_message("⚠️ لا توجد فعالية نشطة حالياً لإنهائها.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -732,7 +804,6 @@ async def end_event(interaction: discord.Interaction):
     event_data["is_active"] = False
     event_data["start_time"] = None
     await interaction.followup.send(embed=embed)
-    await send_slash_log(interaction, "تم إنهاء الفعالية وعرض النتائج بنجاح.", is_success=True)
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -743,11 +814,9 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         else:
             await interaction.followup.send(f"❌ {msg}", ephemeral=True)
     else:
-        err_msg = str(error)
         if not interaction.response.is_done():
-            await interaction.response.send_message(f"❌ حدث خطأ أثناء تنفيذ الأمر.", ephemeral=True)
+            await interaction.response.send_message("❌ حدث خطأ أثناء تنفيذ الأمر.", ephemeral=True)
         else:
-            await interaction.followup.send(f"❌ حدث خطأ أثناء تنفيذ الأمر.", ephemeral=True)
-        print(f"خطأ في أمر السلاش: {error}")
+            await interaction.followup.send("❌ حدث خطأ أثناء تنفيذ الأمر.", ephemeral=True)
 
 bot.run(os.getenv('TOKEN'))
