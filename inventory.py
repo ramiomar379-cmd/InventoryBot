@@ -46,7 +46,7 @@ TARGET_CHANNELS_FOR_DIVIDER = [
 ]
 
 LOG_SLASH_COMMANDS_CHANNEL_ID = 1526668615812907129  
-LOG_SYNC_CHANNEL_ID = 1526668612398485584          
+LOG_SYNC_CHANNEL_ID = 1526668612398485584         
 LOG_ATTENDANCE_CHANNEL_ID = 1534711951144390806    
 LOG_ID_COMMAND_CHANNEL_ID = 1534715397570560071    
 SUMMON_TARGET_CHANNEL_ID = 1534729850160545942
@@ -67,7 +67,7 @@ UNIT_ALLOWED_ROLES = [
 ATTENDANCE_CHANNEL_ID = 1526668199662452767
 # -------------------------------------------------------------------------------------
 
-MAIN_GUILD_ID = 1441066070461911193       
+MAIN_GUILD_ID = 1441066070461911193        
 SECONDARY_GUILD_ID = 1526667305017413643  
 
 ROLE_MAPPING = {
@@ -75,15 +75,17 @@ ROLE_MAPPING = {
     1441072529111519353: 1526667549956116642,
 }
 
+# تم إضافة الروم الجديدة 1526668577971765449 هنا أيضاً ضمن القنوات المقروءة للضباط والوحدة (مع تحديد قيمة النقاط افتراضياً بـ 2 أو حسب رغبتك)
 OFFICER_CHANNELS = {
     1526668339391365170: 2, 1526668345448075284: 2,
-    1526668348262187188: 2, 1526668342444949696: 4
+    1526668348262187188: 2, 1526668342444949696: 4,
+    1526668577971765449: 2
 }
 
 ARREST_CHANNELS = {
     1526668398719926362: 6, 1526668402947653823: 8,
     1526668405619560468: 5, 1526668409046171699: 4,
-    1526668395406430308: 4
+    1526668395406430308: 4, 1526668577971765449: 5
 }
 
 active_sessions = {}
@@ -666,163 +668,8 @@ async def count(
             stats[msg.author.id] = stats.get(msg.author.id, 0) + 1
 
     report_title = f"رسائل قناة #{interaction.channel.name} ({start_day}/{start_month} - {end_day}/{end_month})"
-    embed_result = format_report_as_embed(report_title, stats, interaction.guild, "رسالة", discord.Color.green())
+    embed_result = format_report_as_embed(report_title, stats, interaction.guild, "رسالة", discord.Color.purple())
     await interaction.followup.send(embed=embed_result)
 
-@bot.tree.command(name="الجرد_الأسبوعي", description="يجرد معدل الدخول والخروج للأسبوع الماضي")
-@app_commands.checks.has_role(ADMIN_ROLE_ID)
-async def weekly_audit(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    now = datetime.datetime.now(datetime.timezone.utc)
-    last_week = now - datetime.timedelta(days=7)
-    users_stats = {}
-    for record in attendance_history:
-        if record["logout"] >= last_week:
-            uid = record["user_id"]
-            users_stats[uid] = users_stats.get(uid, 0) + (record["logout"] - record["login"]).total_seconds()
-            
-    embed = discord.Embed(title="📊 الجرد الأسبوعي للمحامين", color=discord.Color.dark_blue())
-    if not users_stats:
-        embed.description = "لا توجد بيانات للأسبوع الماضي."
-        await interaction.followup.send(embed=embed)
-        return
-
-    desc = ""
-    for uid, seconds in sorted(users_stats.items(), key=lambda x: x[1], reverse=True):
-        member = interaction.guild.get_member(uid)
-        name = member.mention if member else f"ID: {uid}"
-        desc += f"👤 {name}\n⏳ إجمالي الوقت: **{round(seconds / 3600, 2)} ساعة**\n\n"
-
-    embed.description = desc
-    await interaction.followup.send(embed=embed)
-
-@bot.tree.command(name="الإحصائيات_اليومية", description="قائمة بكل شخص سجل دخول وخروج اليوم")
-@app_commands.checks.has_role(ADMIN_ROLE_ID)
-async def daily_stats(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    now = datetime.datetime.now(datetime.timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    embed = discord.Embed(title="📅 إحصائيات اليوم الحالي", color=discord.Color.teal())
-    desc = ""
-    found = False
-    
-    for record in attendance_history:
-        if record["login"] >= today_start or record["logout"] >= today_start:
-            found = True
-            member = interaction.guild.get_member(record["user_id"])
-            name = member.mention if member else f"ID: {record['user_id']}"
-            t_in = record["login"].strftime("%H:%M")
-            t_out = record["logout"].strftime("%H:%M")
-            desc += f"👤 {name}\n📥 الدخول: `{t_in}`\n📤 الخروج: `{t_out}`\n\n"
-            
-    if not found:
-        desc = "لم يقم أحد بتسجيل الدخول أو الخروج اليوم."
-        
-    embed.description = desc
-    await interaction.followup.send(embed=embed)
-
-@bot.tree.command(name="قائمة_المتصدرين_الشهرية", description="أكثر الأشخاص تفاعلاً خلال آخر شهر")
-@app_commands.checks.has_role(ADMIN_ROLE_ID)
-async def monthly_leaderboard(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    now = datetime.datetime.now(datetime.timezone.utc)
-    last_month = now - datetime.timedelta(days=30)
-    users_stats = {}
-    for record in attendance_history:
-        if record["logout"] >= last_month:
-            uid = record["user_id"]
-            users_stats[uid] = users_stats.get(uid, 0) + (record["logout"] - record["login"]).total_seconds()
-
-    embed = discord.Embed(title="🏆 قائمة المتصدرين الشهرية", color=discord.Color.gold())
-    if not users_stats:
-        embed.description = "لا توجد بيانات كافية."
-        await interaction.followup.send(embed=embed)
-        return
-
-    desc = ""
-    for rank, (uid, seconds) in enumerate(sorted(users_stats.items(), key=lambda x: x[1], reverse=True), 1):
-        member = interaction.guild.get_member(uid)
-        name = member.mention if member else f"ID: {uid}"
-        desc += f"**المركز {rank}** 🏅\n👤 {name}\n⏱️ **{round(seconds / 3600, 2)} ساعة**\n\n"
-
-    embed.description = desc
-    await interaction.followup.send(embed=embed)
-
-@bot.tree.command(name="قائمة_المتصدرين", description="أكثر الأشخاص تفاعلاً بشكل كامل")
-@app_commands.checks.has_role(ADMIN_ROLE_ID)
-async def all_time_leaderboard(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    users_stats = {}
-    for record in attendance_history:
-        uid = record["user_id"]
-        users_stats[uid] = users_stats.get(uid, 0) + (record["logout"] - record["login"]).total_seconds()
-
-    embed = discord.Embed(title="👑 قائمة المتصدرين الشاملة", color=discord.Color.purple())
-    if not users_stats:
-        embed.description = "لا توجد بيانات مسجلة بعد."
-        await interaction.followup.send(embed=embed)
-        return
-
-    desc = ""
-    for rank, (uid, seconds) in enumerate(sorted(users_stats.items(), key=lambda x: x[1], reverse=True), 1):
-        member = interaction.guild.get_member(uid)
-        name = member.mention if member else f"ID: {uid}"
-        desc += f"**المركز {rank}** 🌟\n👤 {name}\n⏱️ **{round(seconds / 3600, 2)} ساعة**\n\n"
-
-    embed.description = desc
-    await interaction.followup.send(embed=embed)
-
-@bot.tree.command(name="بدأ_فعالية", description="يبدأ احتساب الساعات لفعالية جديدة")
-@app_commands.checks.has_role(ADMIN_ROLE_ID)
-async def start_event(interaction: discord.Interaction):
-    event_data["is_active"] = True
-    event_data["start_time"] = datetime.datetime.now(datetime.timezone.utc)
-    embed = discord.Embed(title="✅ تم بدء الفعالية بنجاح!", description="سيتم الآن احتساب ساعات التفاعل بشكل منفصل حتى يتم إنهاء الفعالية.", color=discord.Color.green())
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-@bot.tree.command(name="انهاء_الفعالية", description="ينهي الفعالية ويعرض قائمة المتصدرين الخاصة بها")
-@app_commands.checks.has_role(ADMIN_ROLE_ID)
-async def end_event(interaction: discord.Interaction):
-    if not event_data["is_active"]:
-        await interaction.response.send_message("⚠️ لا توجد فعالية نشطة حالياً لإنهائها.", ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-    start_time = event_data["start_time"]
-    users_stats = {}
-    for record in attendance_history:
-        if record["logout"] >= start_time:
-            uid = record["user_id"]
-            log_start = max(record["login"], start_time)
-            users_stats[uid] = users_stats.get(uid, 0) + (record["logout"] - log_start).total_seconds()
-
-    embed = discord.Embed(title="🎉 نتائج الفعالية الخاصة", color=discord.Color.magenta())
-    if not users_stats:
-        embed.description = "انتهت الفعالية ولم يقم أحد بتسجيل الدخول خلالها."
-    else:
-        desc = ""
-        for rank, (uid, seconds) in enumerate(sorted(users_stats.items(), key=lambda x: x[1], reverse=True), 1):
-            member = interaction.guild.get_member(uid)
-            name = member.mention if member else f"ID: {uid}"
-            desc += f"**المركز {rank}** 🎁\n👤 {name}\n⏱️ **{round(seconds / 3600, 2)} ساعة**\n\n"
-        embed.description = desc
-
-    event_data["is_active"] = False
-    event_data["start_time"] = None
-    await interaction.followup.send(embed=embed)
-
-@bot.tree.error
-async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    if isinstance(error, (app_commands.errors.MissingRole, app_commands.errors.MissingAnyRole)):
-        msg = "ليس لديك الصلاحية لاستخدام هذا الأمر."
-        if not interaction.response.is_done():
-            await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
-        else:
-            await interaction.followup.send(f"❌ {msg}", ephemeral=True)
-    else:
-        if not interaction.response.is_done():
-            await interaction.response.send_message("❌ حدث خطأ أثناء تنفيذ الأمر.", ephemeral=True)
-        else:
-            await interaction.followup.send("❌ حدث خطأ أثناء تنفيذ الأمر.", ephemeral=True)
-
-bot.run(os.getenv('TOKEN'))
+# ضع التوكن الخاص بك هنا لتشغيل البوت
+bot.run("YOUR_BOT_TOKEN")
