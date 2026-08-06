@@ -242,6 +242,9 @@ async def on_ready():
     check_offline_status.start()
     print(f"✅ تم تشغيل البوت بنجاح: {bot.user}")
 
+# نظام المحادثة خطوة بخطوة للاستدعاء
+summon_wizard_sessions = {}
+
 @bot.event
 async def on_message(message: discord.Message):
     if message.channel.id in TARGET_CHANNELS_FOR_DIVIDER:
@@ -251,6 +254,46 @@ async def on_message(message: discord.Message):
 
     if message.author.bot:
         return
+
+    # معالجة خطوات استطلاع الاستدعاء بالخاص أو الشات
+    if message.author.id in summon_wizard_sessions:
+        session = summon_wizard_sessions[message.author.id]
+        step = session["step"]
+        content = message.content.strip()
+
+        if step == 1:
+            session["target_user_id"] = content
+            session["step"] = 2
+            await message.channel.send(f"✅ تم حفظ أيدي الشخص. الآن أرسل **سبب الاستدعاء**:")
+            return
+        elif step == 2:
+            session["reason"] = content
+            session["step"] = 3
+            await message.channel.send(f"✅ تم حفظ السبب. الآن أرسل **أيدي المسؤول (أيدي الخاص بك)**:")
+            return
+        elif step == 3:
+            session["officer_id"] = content
+            session["step"] = 4
+            await message.channel.send(f"✅ تم حفظ أيدي المسؤول. الآن أرسل **مكان الحضور (رابط الروم / الاجتماع)**:")
+            return
+        elif step == 4:
+            session["meeting_link"] = content
+            session["step"] = 5
+            await message.channel.send(f"✅ تم حفظ الرابط. الآن أرسل **أيدي رتبة المسؤول (Role ID)**:")
+            return
+        elif step == 5:
+            session["officer_role_id"] = content
+            session["step"] = 6
+            await message.channel.send(f"✅ تم حفظ رتبة المسؤول. الآن أرسل **أيدي رتبة المستدعَى (Role ID)**:")
+            return
+        elif step == 6:
+            session["summoned_role_id"] = content
+            session["step"] = 7
+            
+            # خطوة اختيار إيقاف الصلاحيات عبر أزرار مضمونة 100%
+            view = SummonChoiceView(session, message.author)
+            await message.channel.send("📌 **اختر الآن هل يشمل الاستدعاء إيقاف الصلاحيات؟**", view=view)
+            return
 
     if message.channel.id == ATTENDANCE_CHANNEL_ID:
         now = datetime.datetime.now(datetime.timezone.utc)
@@ -287,103 +330,77 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
-# ----------------- النوافذ التفاعلية (Modals & Views) المُصححة إجبارياً -----------------
-class SummonModal(discord.ui.Modal, title="إصدار استدعاء رسمي ⚖️"):
-    target_user_id = discord.ui.TextInput(label="أيدي الشخص المراد استدعاؤه (User ID)", placeholder="مثال: 1521418837378072656", required=True)
-    reason = discord.ui.TextInput(label="السبب", placeholder="اكتب سبب الاستدعاء هنا...", style=discord.TextStyle.paragraph, required=True)
-    officer_id = discord.ui.TextInput(label="أيدي المسؤول (User ID)", placeholder="مثال الخاص بك...", required=True)
-    meeting_link = discord.ui.TextInput(label="مكان الحضور (لينك الروم / الاجتماع)", placeholder="https://discord.gg/...", required=True)
-    officer_role_id = discord.ui.TextInput(label="أيدي رتبة المسؤول (Role ID)", placeholder="أيدي رتبتك...", required=True)
-    summoned_role_id = discord.ui.TextInput(label="أيدي رتبة المستدعَى (Role ID)", placeholder="أيدي رتبة الشخص...", required=True)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            view = SummonActionView(
-                target_user_id=self.target_user_id.value.strip(),
-                reason=self.reason.value.strip(),
-                officer_id=self.officer_id.value.strip(),
-                meeting_link=self.meeting_link.value.strip(),
-                officer_role_id=self.officer_role_id.value.strip(),
-                summoned_role_id=self.summoned_role_id.value.strip(),
-                author=interaction.user
-            )
-            # استخدام response.send_message مع ephemeral=True لضمان ظهور القائمة المنسدلة فوراً وإجبارياً للمستخدم
-            await interaction.response.send_message(
-                "📌 **يرجى تحديد خيار إيقاف الصلاحيات أدناه لإتمام وإرسال الاستدعاء للقناة:**", 
-                view=view, 
-                ephemeral=True
-            )
-        except Exception as e:
-            print(f"❌ خطأ في فتح نموذج الاستدعاء: {e}")
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌ حدث خطأ أثناء معالجة البيانات المدخلة.", ephemeral=True)
-
-    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
-        print(f"❌ خطأ داخلي في SummonModal: {error}")
-        if not interaction.response.is_done():
-            await interaction.response.send_message("❌ حدث خطأ غير متوقع أثناء إرسال النافذة.", ephemeral=True)
-
-class SummonActionView(discord.ui.View):
-    def __init__(self, target_user_id, reason, officer_id, meeting_link, officer_role_id, summoned_role_id, author):
-        super().__init__(timeout=180)
-        self.target_user_id = target_user_id
-        self.reason = reason
-        self.officer_id = officer_id
-        self.meeting_link = meeting_link
-        self.officer_role_id = officer_role_id
-        self.summoned_role_id = summoned_role_id
+# ----------------- أزرار خيار إيقاف الصلاحيات الآمنة -----------------
+class SummonChoiceView(discord.ui.View):
+    def __init__(self, session_data, author):
+        super().__init__(timeout=300)
+        self.session_data = session_data
         self.author = author
 
-    @discord.ui.select(
-        placeholder="اختر هل يشمل إيقاف الصلاحيات؟ (اضغط هنا)",
-        min_values=1,
-        max_values=1,
-        options=[
-            discord.SelectOption(label="نعم・يُمنع من مباشرة العمل إلى أشعاراً آخر", value="yes", emoji="🔒"),
-            discord.SelectOption(label="لا・يستكمل عمله", value="no", emoji="🔓")
-        ]
+    @discord.ui.button(label="نعم (يُمنع من العمل)", style=discord.ButtonStyle.danger, emoji="🔒")
+    async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("❌ هذا ليس استدعاؤك!", ephemeral=True)
+            return
+        await self.finalize_summon(interaction, "🔒 **نعم・يُمنع من مباشرة العمل إلى أشعاراً آخر**", discord.Color.dark_red())
+
+    @discord.ui.button(label="لا (يستكمل عمله)", style=discord.ButtonStyle.success, emoji="🔓")
+    async def no_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("❌ هذا ليس استدعاؤك!", ephemeral=True)
+            return
+        await self.finalize_summon(interaction, "🔓 **لا・يستكمل عمله**", discord.Color.gold())
+
+    async def finalize_summon(self, interaction: discord.Interaction, suspension_status, color):
+        await interaction.response.defer(ephemeral=True)
+        data = self.session_data
+
+        target_channel = interaction.guild.get_channel(SUMMON_TARGET_CHANNEL_ID)
+        if not target_channel:
+            await interaction.followup.send("❌ قناة إرسال الاستدعاء غير موجودة أو خطأ في الأيدي!", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="⚖️ | بـلاغ اسـتدعـاء رسـمي - الـنيابـة العـامة",
+            color=color,
+            timestamp=datetime.datetime.now(datetime.timezone.utc)
+        )
+        embed.description = (
+            f"السلام عليكم ورحمة الله وبركاته،\n"
+            f"بناءً على المهام الرسمية، تقرر استدعاء العضو الموضح بياناته أدناه:\n\n"
+            f"👤 **المستدعَى:** <@{data['target_user_id']}> (`{data['target_user_id']}`)\n"
+            f"🎖️ **رتبة المستدعَى:** <@&{data['summoned_role_id']}>\n\n"
+            f"📋 **الـسـبـب:**\n> {data['reason']}\n\n"
+            f"🛡️ **المسؤول القائم بالاستدعاء:** <@{data['officer_id']}> (`{data['officer_id']}`)\n"
+            f"🎖️ **رتبة المسؤول:** <@&{data['officer_role_id']}>\n\n"
+            f"⚡ **إيقاف الصلاحيات:** {suspension_status}\n\n"
+            f"🔗 **مكان الحضور:** [اضغط هنا للدخول والتوجّه]({data['meeting_link']})\n"
+        )
+        embed.set_image(url=SUMMON_IMAGE_URL)
+        icon_url = interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None
+        embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق", icon_url=icon_url)
+
+        await target_channel.send(embed=embed)
+        
+        if interaction.user.id in summon_wizard_sessions:
+            del summon_wizard_sessions[interaction.user.id]
+
+        await interaction.edit_original_response(content="✅ **تم إصدار وإرسال الاستدعاء الرسمي بنجاح وتوجيه البلاغ للقناة المخصصة!**", view=None)
+
+# أوامر السلاش المعدلة
+@bot.tree.command(name="ألصقه_استدعاء", description="إصدار استدعاء رسمي عبر المحادثة التفاعلية خطوة بخطوة")
+async def paste_summon(interaction: discord.Interaction):
+    if not has_summon_permission(interaction):
+        msg = "ليس لديك الصلاحية لاستخدام هذا الأمر."
+        await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
+        await send_slash_log(interaction, msg, is_success=False)
+        return
+
+    summon_wizard_sessions[interaction.user.id] = {"step": 1}
+    await interaction.response.send_message(
+        "⚖️ **بدء نظام الاستدعاء الرسمي:**\nالرجاء إرسال **أيدي الشخص المراد استدعاؤه (User ID)** في الرسالة القادمة:", 
+        ephemeral=True
     )
-    async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
-        try:
-            await interaction.response.defer(ephemeral=True)
-            choice = select.values[0]
-            suspension_status = "🔒 **نعم・يُمنع من مباشرة العمل إلى أشعاراً آخر**" if choice == "yes" else "🔓 **لا・يستكمل عمله**"
-
-            target_channel = interaction.guild.get_channel(SUMMON_TARGET_CHANNEL_ID)
-            if not target_channel:
-                await interaction.followup.send("❌ قناة إرسال الاستدعاء غير موجودة أو خطأ في الأيدي!", ephemeral=True)
-                return
-
-            embed = discord.Embed(
-                title="⚖️ | بـلاغ اسـتدعـاء رسـمي - الـنيابـة العـامة",
-                color=discord.Color.dark_red() if choice == "yes" else discord.Color.gold(),
-                timestamp=datetime.datetime.now(datetime.timezone.utc)
-            )
-            embed.description = (
-                f"السلام عليكم ورحمة الله وبركاته،\n"
-                f"بناءً على المهام الرسمية، تقرر استدعاء العضو الموضح بياناته أدناه:\n\n"
-                f"👤 **المستدعَى:** <@{self.target_user_id}> (`{self.target_user_id}`)\n"
-                f"🎖️ **رتبة المستدعَى:** <@&{self.summoned_role_id}>\n\n"
-                f"📋 **الـسـبـب:**\n> {self.reason}\n\n"
-                f"🛡️ **المسؤول القائم بالاستدعاء:** <@{self.officer_id}> (`{self.officer_id}`)\n"
-                f"🎖️ **رتبة المسؤول:** <@&{self.officer_role_id}>\n\n"
-                f"⚡ **إيقاف الصلاحيات:** {suspension_status}\n\n"
-                f"🔗 **مكان الحضور:** [اضغط هنا للدخول والتوجّه]({self.meeting_link})\n"
-            )
-            embed.set_image(url=SUMMON_IMAGE_URL)
-            
-            icon_url = interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None
-            embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق", icon_url=icon_url)
-
-            await target_channel.send(embed=embed)
-            await interaction.edit_original_response(content="✅ **تم إصدار وإرسال الاستدعاء الرسمي بنجاح وتوجيه البلاغ للقناة المخصصة!**", view=None)
-            await send_slash_log(interaction, f"تم إصدار استدعاء رسمي للعضو ID: `{self.target_user_id}` بواسطة المسؤول ID: `{self.officer_id}`", is_success=True)
-        except Exception as e:
-            print(f"❌ خطأ أثناء تنفيذ Select Callback للاستدعاء: {e}")
-            try:
-                await interaction.followup.send("❌ حدث خطأ أثناء إرسال الاستدعاء للقناة. تأكد من صحة الأيدي المدخلة.", ephemeral=True)
-            except:
-                pass
 
 class StopInvestigationModal(discord.ui.Modal, title="إيقاف التحقيق وإعادة العضو للخدمة ⚖️"):
     target_user_id = discord.ui.TextInput(label="أيدي العضو المراد إنهاء إيقافه (User ID)", placeholder="مثال: 1521418837378072656", required=True)
@@ -418,17 +435,6 @@ class StopInvestigationModal(discord.ui.Modal, title="إيقاف التحقيق 
         await target_channel.send(embed=embed)
         await interaction.followup.send("✅ **تم إرسال قرار وقف التحقيق وإعادة العضو للخدمة بنجاح!**", ephemeral=True)
         await send_slash_log(interaction, f"تم تنفيذ أمر /وقف_عنه_التحقيق للعضو ID: `{self.target_user_id.value}`", is_success=True)
-
-# ----------------- أوامر السلاش -----------------
-@bot.tree.command(name="ألصقه_استدعاء", description="إصدار استدعاء رسمي وتوجيهه للقناة المخصصة")
-async def paste_summon(interaction: discord.Interaction):
-    if not has_summon_permission(interaction):
-        msg = "ليس لديك الصلاحية لاستخدام هذا الأمر."
-        await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
-        await send_slash_log(interaction, msg, is_success=False)
-        return
-    modal = SummonModal()
-    await interaction.response.send_modal(modal)
 
 @bot.tree.command(name="وقف_عنه_التحقيق", description="إيقاف التحقيق وإعادة العضو للخدمة وصلاحياته")
 async def stop_investigation(interaction: discord.Interaction):
