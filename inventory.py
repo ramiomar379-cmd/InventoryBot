@@ -287,7 +287,7 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
-# ----------------- النوافذ التفاعلية (Modals & Views) المُصححة بالكامل -----------------
+# ----------------- النوافذ التفاعلية (Modals & Views) المُصححة إجبارياً -----------------
 class SummonModal(discord.ui.Modal, title="إصدار استدعاء رسمي ⚖️"):
     target_user_id = discord.ui.TextInput(label="أيدي الشخص المراد استدعاؤه (User ID)", placeholder="مثال: 1521418837378072656", required=True)
     reason = discord.ui.TextInput(label="السبب", placeholder="اكتب سبب الاستدعاء هنا...", style=discord.TextStyle.paragraph, required=True)
@@ -307,7 +307,12 @@ class SummonModal(discord.ui.Modal, title="إصدار استدعاء رسمي �
                 summoned_role_id=self.summoned_role_id.value.strip(),
                 author=interaction.user
             )
-            await interaction.response.send_message("📌 **يرجى تحديد خيار إيقاف الصلاحيات أدناه لإتمام وإرسال الاستدعاء للقناة:**", view=view, ephemeral=True)
+            # استخدام response.send_message مع ephemeral=True لضمان ظهور القائمة المنسدلة فوراً وإجبارياً للمستخدم
+            await interaction.response.send_message(
+                "📌 **يرجى تحديد خيار إيقاف الصلاحيات أدناه لإتمام وإرسال الاستدعاء للقناة:**", 
+                view=view, 
+                ephemeral=True
+            )
         except Exception as e:
             print(f"❌ خطأ في فتح نموذج الاستدعاء: {e}")
             if not interaction.response.is_done():
@@ -330,7 +335,9 @@ class SummonActionView(discord.ui.View):
         self.author = author
 
     @discord.ui.select(
-        placeholder="اختر هل يشمل إيقاف الصلاحيات؟",
+        placeholder="اختر هل يشمل إيقاف الصلاحيات؟ (اضغط هنا)",
+        min_values=1,
+        max_values=1,
         options=[
             discord.SelectOption(label="نعم・يُمنع من مباشرة العمل إلى أشعاراً آخر", value="yes", emoji="🔒"),
             discord.SelectOption(label="لا・يستكمل عمله", value="no", emoji="🔓")
