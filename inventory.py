@@ -25,9 +25,13 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------------------------- القنوات والرتب المحددة ------------------------------
-# الرتبة الوحيدة المسموح لها بأوامر count و mentions والأوامر الإدارية الجديدة
 MENTIONS_COUNT_ALLOWED_ROLE = 1526667402325131414
 ADMIN_ROLE_ID = 1526667402325131414
+
+# رومات اللوق الجديدة المطلوبة
+LOG_SLASH_COMMANDS_CHANNEL_ID = 1526668615812907129  # لوق أوامر السلاش
+LOG_SYNC_CHANNEL_ID = 1526668612398485584          # لوق المُزامنة
+LOG_ATTENDANCE_CHANNEL_ID = 1534711951144390806    # لوق ورقة الحضور
 
 # جرد الضباط
 OFFICERS_AUDIT_CHANNEL_ID = 1526668727657955418
@@ -84,7 +88,6 @@ offline_timers = {}
 attendance_history = []
 event_data = {"is_active": False, "start_time": None}
 
-# رابط الصورة المحدث
 IMAGE_URL = "https://media.discordapp.net/attachments/1151101245537386609/1472578282963865670/Screenshot_7.png?ex=6a748565&is=6a7333e5&hm=cbe205704e37d40df6e535912e57cb27353d9305f879b2efd12961d384bac3b0&=&format=webp&quality=lossless&width=1280&height=281"
 # ----------------------------------------------------------------
 
@@ -96,11 +99,47 @@ def has_single_role(interaction: discord.Interaction, role_id: int) -> bool:
     user_role_ids = [role.id for role in interaction.user.roles]
     return role_id in user_role_ids
 
+# دالة إرسال لوق أوامر السلاش تلقائياً
+async def send_slash_log(interaction: discord.Interaction):
+    try:
+        log_channel = bot.get_channel(LOG_SLASH_COMMANDS_CHANNEL_ID)
+        if log_channel:
+            embed = discord.Embed(title="⚙️ لوق استخدام أمر سلاش", color=discord.Color.blue(), timestamp=datetime.datetime.now(datetime.timezone.utc))
+            embed.add_name = "المستخدم"
+            embed.add_field(name="👤 العضو", value=f"{interaction.user.mention} (`{interaction.user.id}`)", inline=True)
+            embed.add_field(name="🛠️ الأمر", value=f"`/{interaction.command.name}`", inline=True)
+            embed.add_field(name="📍 الروم", value=f"{interaction.channel.mention}", inline=False)
+            await log_channel.send(embed=embed)
+    except Exception as e:
+        print(f"❌ خطأ في إرسال لوق أوامر السلاش: {e}")
+
+# دالة إرسال لوق المُزامنة
+async def send_sync_log(text: str):
+    try:
+        log_channel = bot.get_channel(LOG_SYNC_CHANNEL_ID)
+        if log_channel:
+            embed = discord.Embed(title="🔄 لوق المُزامنة", description=text, color=discord.Color.purple(), timestamp=datetime.datetime.now(datetime.timezone.utc))
+            await log_channel.send(embed=embed)
+    except Exception as e:
+        print(f"❌ خطأ في إرسال لوق المُزامنة: {e}")
+
+# دالة إرسال لوق ورقة الحضور
+async def send_attendance_log(text: str, color=discord.Color.green()):
+    try:
+        log_channel = bot.get_channel(LOG_ATTENDANCE_CHANNEL_ID)
+        if log_channel:
+            embed = discord.Embed(title="📋 لوق ورقة الحضور", description=text, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
+            await log_channel.send(embed=embed)
+    except Exception as e:
+        print(f"❌ خطأ في إرسال لوق ورقة الحضور: {e}")
+
 async def sync_user_data(main_member: discord.Member, sec_member: discord.Member):
+    changes = []
     try:
         target_nick = main_member.display_name
         if sec_member.display_name != target_nick:
             await sec_member.edit(nick=target_nick)
+            changes.append(f"تم تغيير اللقب إلى: `{target_nick}`")
     except Exception as e:
         print(f"❌ تعذر تغيير اسم العضو {sec_member}: {e}")
 
@@ -117,14 +156,21 @@ async def sync_user_data(main_member: discord.Member, sec_member: discord.Member
             if main_role_id in main_role_ids:
                 if sec_role not in sec_member.roles:
                     roles_to_add.append(sec_role)
+                    changes.append(f"إضافة رتبة: {sec_role.name}")
             else:
                 if sec_role in sec_member.roles:
                     roles_to_remove.append(sec_role)
+                    changes.append(f"إزالة رتبة: {sec_role.name}")
 
         if roles_to_add:
             await sec_member.add_roles(*roles_to_add)
         if roles_to_remove:
             await sec_member.remove_roles(*roles_to_remove)
+            
+        if changes:
+            log_text = f"👤 العضو: {main_member.mention} (`{main_member.id}`)\n" + "\n".join(changes)
+            await send_sync_log(log_text)
+            
     except Exception as e:
         print(f"❌ تعذر تحديث رتب العضو {sec_member}: {e}")
 
@@ -181,6 +227,7 @@ async def check_offline_status():
                     await member.send("⚠️ تم تسجيل خروجك تلقائياً من النظام بسبب بقائك في وضع (Offline) لأكثر من 10 دقائق.")
                 except Exception:
                     pass
+                await send_attendance_log(f"⚠️ تسجيل خروج تلقائي (أوفلاين) للمحامي: {member.mention} (`{member.id}`)", discord.Color.orange())
         else:
             if user_id in offline_timers:
                 del offline_timers[user_id]
@@ -217,6 +264,7 @@ async def on_message(message: discord.Message):
             
             await message.channel.send(embed=embed)
             await message.delete()
+            await send_attendance_log(f"📥 تسجيل دخول المحامي: {message.author.mention} (`{message.author.id}`)", discord.Color.green())
 
         elif message.content.strip() == '-خ':
             if message.author.id in active_sessions:
@@ -238,6 +286,9 @@ async def on_message(message: discord.Message):
                 
                 await message.channel.send(embed=embed)
                 await message.delete()
+                
+                duration = round((now - login_time).total_seconds() / 3600, 2)
+                await send_attendance_log(f"📤 تسجيل خروج المحامي: {message.author.mention} (`{message.author.id}`)\n⏱️ مدة الجلسة: **{duration} ساعة**", discord.Color.red())
 
     await bot.process_commands(message)
 
@@ -277,6 +328,7 @@ def format_report_as_embed(title, stats, guild, unit_name="نقطة", color=disc
 @bot.tree.command(name="check_officers", description="جرد نقاط الضباط")
 @app_commands.checks.has_any_role(*OFFICERS_ALLOWED_ROLES)
 async def check_officers(interaction: discord.Interaction):
+    await send_slash_log(interaction)
     if interaction.channel_id != OFFICERS_AUDIT_CHANNEL_ID:
         await interaction.response.send_message(f"❌ يمكنك استخدام هذا الأمر فقط داخل الروم المخصصة: <#{OFFICERS_AUDIT_CHANNEL_ID}>", ephemeral=True)
         return
@@ -298,6 +350,7 @@ async def check_officers(interaction: discord.Interaction):
 @bot.tree.command(name="check_arrests", description="جرد نقاط القبض")
 @app_commands.checks.has_any_role(*UNIT_ALLOWED_ROLES)
 async def check_arrests(interaction: discord.Interaction):
+    await send_slash_log(interaction)
     if interaction.channel_id != UNIT_AUDIT_CHANNEL_ID:
         await interaction.response.send_message(f"❌ يمكنك استخدام هذا الأمر فقط داخل الروم المخصصة: <#{UNIT_AUDIT_CHANNEL_ID}>", ephemeral=True)
         return
@@ -331,6 +384,7 @@ async def mentions(
     start_year: int, start_month: int, start_day: int,
     end_year: int, end_month: int, end_day: int
 ):
+    await send_slash_log(interaction)
     try:
         start_date = datetime.datetime(start_year, start_month, start_day, 0, 0, 0, tzinfo=datetime.timezone.utc)
         end_date = datetime.datetime(end_year, end_month, end_day, 23, 59, 59, tzinfo=datetime.timezone.utc)
@@ -364,6 +418,7 @@ async def count(
     start_year: int, start_month: int, start_day: int,
     end_year: int, end_month: int, end_day: int
 ):
+    await send_slash_log(interaction)
     try:
         start_date = datetime.datetime(start_year, start_month, start_day, 0, 0, 0, tzinfo=datetime.timezone.utc)
         end_date = datetime.datetime(end_year, end_month, end_day, 23, 59, 59, tzinfo=datetime.timezone.utc)
@@ -385,6 +440,7 @@ async def count(
 @bot.tree.command(name="الجرد_الأسبوعي", description="يجرد معدل الدخول والخروج للأسبوع الماضي")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def weekly_audit(interaction: discord.Interaction):
+    await send_slash_log(interaction)
     now = datetime.datetime.now(datetime.timezone.utc)
     last_week = now - datetime.timedelta(days=7)
     
@@ -415,6 +471,7 @@ async def weekly_audit(interaction: discord.Interaction):
 @bot.tree.command(name="الإحصائيات_اليومية", description="قائمة بكل شخص سجل دخول وخروج اليوم")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def daily_stats(interaction: discord.Interaction):
+    await send_slash_log(interaction)
     now = datetime.datetime.now(datetime.timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     
@@ -440,6 +497,7 @@ async def daily_stats(interaction: discord.Interaction):
 @bot.tree.command(name="قائمة_المتصدرين_الشهرية", description="أكثر الأشخاص تفاعلاً خلال آخر شهر")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def monthly_leaderboard(interaction: discord.Interaction):
+    await send_slash_log(interaction)
     now = datetime.datetime.now(datetime.timezone.utc)
     last_month = now - datetime.timedelta(days=30)
     
@@ -470,6 +528,7 @@ async def monthly_leaderboard(interaction: discord.Interaction):
 @bot.tree.command(name="قائمة_المتصدرين", description="أكثر الأشخاص تفاعلاً بشكل كامل")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def all_time_leaderboard(interaction: discord.Interaction):
+    await send_slash_log(interaction)
     users_stats = {}
     for record in attendance_history:
         uid = record["user_id"]
@@ -496,6 +555,7 @@ async def all_time_leaderboard(interaction: discord.Interaction):
 @bot.tree.command(name="بدأ_فعالية", description="يبدأ احتساب الساعات لفعالية جديدة")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def start_event(interaction: discord.Interaction):
+    await send_slash_log(interaction)
     event_data["is_active"] = True
     event_data["start_time"] = datetime.datetime.now(datetime.timezone.utc)
     
@@ -509,6 +569,7 @@ async def start_event(interaction: discord.Interaction):
 @bot.tree.command(name="انهاء_الفعالية", description="ينهي الفعالية ويعرض قائمة المتصدرين الخاصة بها")
 @app_commands.checks.has_role(ADMIN_ROLE_ID)
 async def end_event(interaction: discord.Interaction):
+    await send_slash_log(interaction)
     if not event_data["is_active"]:
         await interaction.response.send_message("⚠️ لا توجد فعالية نشطة حالياً لإنهائها.", ephemeral=True)
         return
@@ -541,10 +602,9 @@ async def end_event(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed)
 
-# معالجة أخطاء الصلاحيات لتظهر بشكل منظم ومفهوم للمستخدم
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    if isinstance(error, app_commands.errors.MissingRole) or isinstance(error, app_commands.errors.MissingAnyRole):
+    if isinstance(error, (app_commands.errors.MissingRole, app_commands.errors.MissingAnyRole)):
         if not interaction.response.is_done():
             await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
     else:
