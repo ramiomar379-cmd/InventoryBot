@@ -53,7 +53,7 @@ TARGET_CHANNELS_FOR_DIVIDER = [
     1526668041843249233,
     1526668648041681006,
     1531025442390147262,
-    1534729850160545942 # إضافة قناة إرسال الاستدعاء لتشمل الخط الفاصل تلقائياً
+    1534729850160545942
 ]
 
 # رومات اللوق الجديدة المطلوبة
@@ -352,14 +352,13 @@ async def on_message(message: discord.Message):
 # ----------------- مودال نافذة الاستدعاء الرسمي -----------------
 class SummonModal(discord.ui.Modal, title="إصدار استدعاء رسمي ⚖️"):
     target_user_id = discord.ui.TextInput(label="أيدي الشخص المراد استدعاؤه (User ID)", placeholder="مثال: 1521418837378072656", required=True)
-    reason = discord.InputTextStyle(label="السبب", placeholder="اكتب سبب الاستدعاء هنا...", style=discord.TextStyle.long, required=True) if hasattr(discord, 'TextStyle') else discord.ui.TextInput(label="السبب", placeholder="اكتب سبب الاستدعاء هنا...", style=discord.TextStyle.paragraph, required=True)
+    reason = discord.ui.TextInput(label="السبب", placeholder="اكتب سبب الاستدعاء هنا...", style=discord.TextStyle.paragraph, required=True)
     officer_id = discord.ui.TextInput(label="أيدي المسؤول (User ID)", placeholder="مثال الخاص بك...", required=True)
     meeting_link = discord.ui.TextInput(label="مكان الحضور (لينك الروم / الاجتماع)", placeholder="https://discord.gg/...", required=True)
     officer_role_id = discord.ui.TextInput(label="أيدي رتبة المسؤول (Role ID)", placeholder="أيدي رتبتك...", required=True)
     summoned_role_id = discord.ui.TextInput(label="أيدي رتبة المستدعَى (Role ID)", placeholder="أيدي رتبة الشخص...", required=True)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # نافذة لاحقة لاختيار حالة إيقاف الصلاحيات
         view = SummonActionView(
             target_user_id=self.target_user_id.value,
             reason=self.reason.value,
@@ -398,7 +397,6 @@ class SummonActionView(discord.ui.View):
             await interaction.response.send_message("❌ قناة إرسال الاستدعاء غير موجودة أو خطأ في الأيدي!", ephemeral=True)
             return
 
-        # بناء الرسالة الرسمية المرتبة للأبعد حد
         embed = discord.Embed(
             title="⚖️ | بـلاغ اسـتدعـاء رسـمي - الـنيابـة العـامة",
             color=discord.Color.dark_red() if choice == "yes" else discord.Color.gold(),
@@ -418,10 +416,7 @@ class SummonActionView(discord.ui.View):
         embed.set_image(url=SUMMON_IMAGE_URL)
         embed.set_footer(text="النيابة العامة • وحدة الشؤون الإدارية والتحقيق", icon_url=interaction.guild.icon.url if interaction.guild.icon else None)
 
-        # إرسال الاستدعاء للقناة المحددة
         await target_channel.send(embed=embed)
-        
-        # الرد على المسؤول وتأكيد الإرسال
         await interaction.response.edit_message(content="✅ **تم إصدار وإرسال الاستدعاء الرسمي بنجاح وتوجيهه للقناة المخصصة!**", view=None)
         await send_slash_log(interaction, f"تم إصدار استدعاء رسمي للعضو ID: `{self.target_user_id}` بواسطة المسؤول ID: `{self.officer_id}`", is_success=True)
 
