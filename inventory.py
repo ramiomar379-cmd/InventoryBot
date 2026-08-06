@@ -376,6 +376,7 @@ class StopInvestigationModal(discord.ui.Modal, title="إيقاف التحقيق 
             color=discord.Color.green(),
             timestamp=datetime.datetime.now(datetime.timezone.utc)
         )
+        # تم تصحيح صياغة الـ description لتفادي ظهور رموز غير مقروءة أو تداخل في المنشنات
         embed.description = (
             f"إلى من يهمه الأمر، تقرر رسمياً رفع وإيقاف إجراءات التحقيق وإعادة العضو المذكور إلى ممارسة مهام عمله الطبيعية:\n\n"
             f"👤 **العضو المعني:** <@{self.target_user_id}> (`{self.target_user_id}`)\n\n"
