@@ -28,11 +28,35 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 MENTIONS_COUNT_ALLOWED_ROLE = 1526667402325131414
 ADMIN_ROLE_ID = 1526667402325131414
 
+# رومات اللوق والقنوات التي طلبت إرسال الخط الفاصل فيها (تم إزالة التكرار)
+TARGET_CHANNELS_FOR_DIVIDER = [
+    1534713004271079604,
+    1526668612398485584,
+    1526668615812907129,
+    1534715397570560071,
+    1534711951144390806,
+    1526668510649122947,
+    1526668448673828944,
+    1526668350846140599,
+    1526668314078740621,
+    1526955624255066332,
+    1527751172029550713,
+    1526668199662452767,
+    1526668203546382406,
+    1526668224140414986,
+    1528548590392180846,
+    1527474093694390374,
+    1527464432618438778,
+    1526668041843249233,
+    1526668648041681006,
+    1531025442390147262
+]
+
 # رومات اللوق الجديدة المطلوبة
-LOG_SLASH_COMMANDS_CHANNEL_ID = 1526668615812907129  # لوق أوامر السلاش
-LOG_SYNC_CHANNEL_ID = 1526668612398485584          # لوق المُزامنة
-LOG_ATTENDANCE_CHANNEL_ID = 1534711951144390806    # لوق ورقة الحضور
-LOG_ID_COMMAND_CHANNEL_ID = 1534715397570560071    # لوق أمر id
+LOG_SLASH_COMMANDS_CHANNEL_ID = 1526668615812907129  
+LOG_SYNC_CHANNEL_ID = 1526668612398485584          
+LOG_ATTENDANCE_CHANNEL_ID = 1534711951144390806    
+LOG_ID_COMMAND_CHANNEL_ID = 1534715397570560071    
 
 # جرد الضباط
 OFFICERS_AUDIT_CHANNEL_ID = 1526668727657955418
@@ -59,8 +83,8 @@ ATTENDANCE_CHANNEL_ID = 1526668199662452767
 # -------------------------------------------------------------------------------------
 
 # ---------------------------------- إعدادات المزامنة ----------------------------------
-MAIN_GUILD_ID = 1441066070461911193       # ID السيرفر الأساسي
-SECONDARY_GUILD_ID = 1526667305017413643  # ID سيرفر النيابة
+MAIN_GUILD_ID = 1441066070461911193       
+SECONDARY_GUILD_ID = 1526667305017413643  
 
 ROLE_MAPPING = {
     1441072532219498629: 1526667652431347772,
@@ -101,7 +125,6 @@ def has_single_role(interaction: discord.Interaction, role_id: int) -> bool:
     user_role_ids = [role.id for role in interaction.user.roles]
     return role_id in user_role_ids
 
-# دالة إرسال التقرير الشامل لأوامر السلاش
 async def send_slash_log(interaction: discord.Interaction, result_text: str, is_success: bool = True):
     try:
         log_channel = bot.get_channel(LOG_SLASH_COMMANDS_CHANNEL_ID)
@@ -111,7 +134,7 @@ async def send_slash_log(interaction: discord.Interaction, result_text: str, is_
             
             embed = discord.Embed(title=status_title, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
             embed.add_field(name="👤 العضو", value=f"{interaction.user.mention} (`{interaction.user.id}`)", inline=False)
-            embed.add_field(name="🛠️ الأمر", value=`/{interaction.command.name if interaction.command else 'Unknown'}`, inline=True)
+            embed.add_field(name="🛠️ الأمر", value=f"/{interaction.command.name if interaction.command else 'Unknown'}", inline=True)
             embed.add_field(name="📍 الروم", value=f"{interaction.channel.mention if interaction.channel else 'Unknown'}", inline=True)
             embed.add_field(name="💬 الرد / النتيجة الصادرة", value=f"```{result_text[:1000]}```", inline=False)
             
@@ -119,7 +142,6 @@ async def send_slash_log(interaction: discord.Interaction, result_text: str, is_
     except Exception as e:
         print(f"❌ خطأ في إرسال لوق أوامر السلاش: {e}")
 
-# دالة إرسال لوق المُزامنة
 async def send_sync_log(text: str):
     try:
         log_channel = bot.get_channel(LOG_SYNC_CHANNEL_ID)
@@ -129,7 +151,6 @@ async def send_sync_log(text: str):
     except Exception as e:
         print(f"❌ خطأ في إرسال لوق المُزامنة: {e}")
 
-# دالة إرسال لوق ورقة الحضور
 async def send_attendance_log(text: str, color=discord.Color.green()):
     try:
         log_channel = bot.get_channel(LOG_ATTENDANCE_CHANNEL_ID)
@@ -140,7 +161,6 @@ async def send_attendance_log(text: str, color=discord.Color.green()):
     except Exception as e:
         print(f"❌ خطأ في إرسال لوق ورقة الحضور: {e}")
 
-# دالة إرسال لوق أمر id
 async def send_id_log(text: str):
     try:
         log_channel = bot.get_channel(LOG_ID_COMMAND_CHANNEL_ID)
@@ -220,7 +240,7 @@ async def keep_alive_task():
     except Exception:
         pass
 
-@tasks.loop(minutes=1)
+@tasks.loop(seconds=30)
 async def check_offline_status():
     now = datetime.datetime.now(datetime.timezone.utc)
     for user_id, login_time in list(active_sessions.items()):
@@ -232,25 +252,26 @@ async def check_offline_status():
         if not member:
             continue
             
-        # التحقق مما إذا كان العضو أوفلاين أو غير متصل (بما يشمل الحالة العادية بدون نشاط مرئي دقيق)
         is_offline = member.status == discord.Status.offline or member.status == discord.Status.invisible
         
         if is_offline:
             if user_id not in offline_timers:
                 offline_timers[user_id] = now
-            elif (now - offline_timers[user_id]).total_seconds() >= 600:
-                del active_sessions[user_id]
-                del offline_timers[user_id]
-                attendance_history.append({
-                    "user_id": user_id,
-                    "login": login_time,
-                    "logout": now
-                })
-                try:
-                    await member.send("⚠️ تم تسجيل خروجك تلقائياً من النظام بسبب بقائك في وضع (Offline) لأكثر من 10 دقائق.")
-                except Exception:
-                    pass
-                await send_attendance_log(f"⚠️ تسجيل خروج تلقائي (أوفلاين) للمحامي: {member.mention} (`{member.id}`)", discord.Color.orange())
+            else:
+                elapsed_seconds = (now - offline_timers[user_id]).total_seconds()
+                if elapsed_seconds >= 600:
+                    del active_sessions[user_id]
+                    del offline_timers[user_id]
+                    attendance_history.append({
+                        "user_id": user_id,
+                        "login": login_time,
+                        "logout": now
+                    })
+                    try:
+                        await member.send("⚠️ تم تسجيل خروجك تلقائياً من النظام بسبب بقائك في وضع (Offline) لأكثر من 10 دقائق.")
+                    except Exception:
+                        pass
+                    await send_attendance_log(f"⚠️ تسجيل خروج تلقائي (أوفلاين) للمحامي: {member.mention} (`{member.id}`)", discord.Color.orange())
         else:
             if user_id in offline_timers:
                 del offline_timers[user_id]
@@ -271,6 +292,15 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
+    # 1. إرسال الخط الفاصل تلقائياً في أي روم مدرجة في القائمة المحددة
+    if message.channel.id in TARGET_CHANNELS_FOR_DIVIDER:
+        # نتأكد أن الرسالة ليست هي الخط نفسه لمنع التكرار اللانهائي
+        if message.content != DIVIDER_GIF_URL:
+            # إذا لم تكن روم الحضور (لأن الحضور لها معالجة خاصة بالأسفل)
+            if message.channel.id != ATTENDANCE_CHANNEL_ID:
+                await message.channel.send(DIVIDER_GIF_URL)
+
+    # 2. معالجة روم تسجيل الحضور (-د / -خ)
     if message.channel.id == ATTENDANCE_CHANNEL_ID:
         now = datetime.datetime.now(datetime.timezone.utc)
         
@@ -286,7 +316,6 @@ async def on_message(message: discord.Message):
             embed.set_footer(text="تسجيل الدخول د\nتسجيل الخروج خ")
             
             await message.channel.send(embed=embed)
-            # إرسال الـ GIF الفاصل تلقائياً في روم ورقة الحضور العامة
             await message.channel.send(DIVIDER_GIF_URL)
             await message.delete()
             await send_attendance_log(f"📥 تسجيل دخول المحامي: {message.author.mention} (`{message.author.id}`)", discord.Color.green())
@@ -310,7 +339,6 @@ async def on_message(message: discord.Message):
                 embed.set_footer(text="تسجيل الدخول د\nتسجيل الخروج خ")
                 
                 await message.channel.send(embed=embed)
-                # إرسال الـ GIF الفاصل تلقائياً في روم ورقة الحضور العامة
                 await message.channel.send(DIVIDER_GIF_URL)
                 await message.delete()
                 
