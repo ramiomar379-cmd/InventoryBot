@@ -351,8 +351,8 @@ async def on_message(message: discord.Message):
                 await channel.set_permissions(role, overwrite=ov)
 
             await channel.send(
-                "**🔓 تنبيه إداري رسمي:\n\n"
-                "تم فتح هذه الروم وإعادة الصلاحيات للأشخاص والرتب التي تم إغلاق الروم عليهم مسبقاً. يمكنكم بدء الكتابة الآن.**"
+                "**🔓 عيشوا البوت مو مقصر معكم وفتحنا الروم:\n\n"
+                "اكتبوا وانبسطوا ورجعت صلاحياتكم يلا باي.**"
             )
 
             await send_custom_log(
