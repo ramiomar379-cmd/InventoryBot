@@ -37,17 +37,14 @@ MENTIONS_COUNT_ALLOWED_ROLE = 1526667402325131414
 ADMIN_ROLE_ID = 1526667402325131414
 SUMMON_ALLOWED_ROLE_ID = 1527238059303899146
 
-# رتب صلاحية جرد الكتائب + الأدمن
 SQUAD_AUDIT_ROLES = [1526667439306178580, 1526957036561236141]
 
-# رتب قادة الكتائب ومسؤولي القبول (لصلاحية أزرار القبول)
 LEADERS_ROLES = [
-    1526667440426188890, 1526667441395208305, 1535777419368071410, # القبض
-    1526667442452168815, 1526667443454476328, 1535777723249729627, # E.C.O
-    1526667445450838046, 1526667446503608341, 1526667447590191104, 1535777899649441923 # الطيران
+    1526667440426188890, 1526667441395208305, 1535777419368071410, 
+    1526667442452168815, 1526667443454476328, 1535777723249729627, 
+    1526667445450838046, 1526667446503608341, 1526667447590191104, 1535777899649441923 
 ]
 
-# قنوات اللوق 
 LOG_SLASH_COMMANDS_CHANNEL_ID = 1526668615812907129  
 LOG_SYNC_CHANNEL_ID = 1526668612398485584          
 LOG_ATTENDANCE_CHANNEL_ID = 1534711951144390806    
@@ -71,7 +68,6 @@ TARGET_CHANNELS_FOR_DIVIDER = [
     1526668648041681006, 1531025442390147262, 1534729850160545942
 ]
 
-# رتب الجوائز
 WEEKLY_WINNER_ROLE_ID = 1534965674840035419
 MONTHLY_WINNER_ROLE_ID = 1526667494901809202
 
@@ -113,7 +109,6 @@ ACCEPT_FINAL_IMG = "https://media.discordapp.net/attachments/1526668577971765449
 ACCEPT_INITIAL_IMG = "https://media.discordapp.net/attachments/1526668577971765449/1535775643822727198/3.png"
 MENU_IMAGE_URL = "https://media.discordapp.net/attachments/1526668577971765449/1536100000000000000/image_3ee0b6.png"
 
-# متغيرات الحفظ في الذاكرة
 active_sessions = {}
 offline_timers = {}
 attendance_history = []
@@ -144,15 +139,11 @@ def has_squad_audit_permission(interaction: discord.Interaction) -> bool:
 
 def get_leaders_signatures(guild: discord.Guild) -> str:
     role = guild.get_role(1535725186957971458)
-    if not role or not role.members:
-        return "**لا يوجد مسؤولين بهذه الرتبة حالياً**"
-    
+    if not role or not role.members: return "**لا يوجد مسؤولين بهذه الرتبة حالياً**"
     members = role.members
     sig_text = ""
-    if len(members) >= 1:
-        sig_text += f"الرتبة الأولى وهي مسؤول الكتائب اسمها\n{members[0].mention}\n\n"
-    if len(members) >= 2:
-        sig_text += f"الرتبة الثانية نائب مسؤول الكتائب\n{members[1].mention}\n"
+    if len(members) >= 1: sig_text += f"الرتبة الأولى وهي مسؤول الكتائب اسمها\n{members[0].mention}\n\n"
+    if len(members) >= 2: sig_text += f"الرتبة الثانية نائب مسؤول الكتائب\n{members[1].mention}\n"
     return sig_text
 
 async def send_custom_log(title: str, description: str, color=discord.Color.blue(), channel_id=GENERAL_CUSTOM_LOG_ID):
@@ -189,11 +180,7 @@ async def sync_user_data(main_member: discord.Member, sec_member: discord.Member
         if roles_to_remove: await sec_member.remove_roles(*roles_to_remove)
         
         if changes:
-            await send_custom_log(
-                title="🔄 لوق مزامنة عضو", 
-                description=f"العضو: {sec_member.mention}\nالتغييرات:\n- " + "\n- ".join(changes),
-                channel_id=LOG_SYNC_CHANNEL_ID
-            )
+            await send_custom_log("🔄 لوق مزامنة عضو", f"العضو: {sec_member.mention}\nالتغييرات:\n- " + "\n- ".join(changes), channel_id=LOG_SYNC_CHANNEL_ID)
     except: pass
 
 # ==========================================
@@ -245,6 +232,7 @@ async def before_check():
 
 @bot.event
 async def on_ready():
+    bot.add_view(ApplicationMenuView()) # 🔴 تم إضافة هذا السطر لحفظ أزرار المنيو بشكل دائم
     await bot.tree.sync()
     keep_alive_task.start()
     check_offline_status.start()
@@ -298,7 +286,6 @@ async def on_message(message: discord.Message):
             await channel.set_permissions(role, overwrite=ov2)
         await channel.send("**🔓 تم فتح الروم ورجعت الصلاحيات.**")
 
-    # نظام الحضور
     if message.channel.id == ATTENDANCE_CHANNEL_ID:
         now = datetime.datetime.now(datetime.timezone.utc)
         if message.content.strip() == '-د':
@@ -328,155 +315,7 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
 # ==========================================
-# 8. أوامر الجرد الأسبوعي والشهري
-# ==========================================
-@bot.tree.command(name="جرد_الكتائب_الأسبوعي", description="إجراء جرد الكتائب الأسبوعي")
-async def weekly_squad_audit(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True) # تم إضافة defer لتجنب خطأ التفكير
-    if not has_squad_audit_permission(interaction):
-        return await interaction.followup.send("**❌ عذراً، ليس لديك الصلاحية.**", ephemeral=True)
-    
-    await interaction.followup.send("**✅ تم بدء الجرد الأسبوعي، يُرجى الانتظار 20 دقيقة للنتيجة النهائية.**", ephemeral=True)
-    
-    target_channel = interaction.guild.get_channel(SQUAD_AUDIT_TARGET_CHANNEL_ID) or interaction.channel
-    signatures = get_leaders_signatures(interaction.guild)
-    
-    initial_msg = (
-        "**| ﷽ |\n\n"
-        "السلام عليكم ورحمة الله وبركاته .\n"
-        "والصلاة والسلام على أشرف الأنبياء والمرسلين .\n"
-        "أسعد الله أوقاتكم بكل خير .\n\n"
-        "تحية طيبة أما بعد :\n\n"
-        "بإسمنا نحن قيادة الكتائب:\n\n"
-        "`بــيـان قــيــادي قــادم بــعــد قلــيــل` \n\n"
-        "فـمـا يـخـص إعــلــان كــتــيـبــة الــأســبوع \n\n"
-        "سائلين الله التوفيق والسداد...\n\n"
-        "يبلغ أمرنا هذا للجهات المختصة فور صدوره .\n\n"
-        "التوقيع :\n\n"
-        f"{signatures}\n\n"
-        "[|| @everyone || -- || @here ||]**"
-    )
-    await target_channel.send(content=initial_msg)
-    
-    await asyncio.sleep(1200) # انتظار 20 دقيقة
-    start_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
-    squad_scores = {}
-    for s_key, s_info in SQUADS_DATA.items():
-        total_msgs = bot_data["squad_points_adjustments"].get(s_key, 0)
-        for cid in s_info["channels"]:
-            ch = bot.get_channel(cid)
-            if ch:
-                async for msg in ch.history(after=start_date, limit=None):
-                    if not msg.author.bot: total_msgs += 1
-        squad_scores[s_key] = total_msgs
-        
-    winner_key = max(squad_scores, key=squad_scores.get)
-    winner_info = SQUADS_DATA[winner_key]
-    winner_points = squad_scores[winner_key]
-    
-    winner_role_obj = interaction.guild.get_role(WEEKLY_WINNER_ROLE_ID)
-    if winner_role_obj:
-        for lead_id in winner_info["leaders"]:
-            leader_member = interaction.guild.get_member(lead_id)
-            if leader_member:
-                try: await leader_member.add_roles(winner_role_obj)
-                except: pass
-                
-    leaders_mentions = " و ".join([f"معالي <@{lid}>" for lid in winner_info["leaders"]])
-    current_date = datetime.datetime.now().strftime("%Y/%m/%d")
-    count = bot_data["weekly_audit"]
-    
-    final_msg = (
-        "**| ﷽ |\n\n\n"
-        f"الرقم: ({count})\n"
-        f"التاريخ: ({current_date})\n\n"
-        "السلام عليكم ورحمة الله وبركاته .\n"
-        "أسعد الله أوقاتكم بكل خير .\n\n"
-        "يسرنا الإعلان عن جرد الكتائب الأسبوعي\n\n"
-        f"تُنصب كتيبة الأسبوع وهي : <@&{winner_info['role_id']}> .\n\n"
-        f"الحاصلين على رتبة : <@&{WEEKLY_WINNER_ROLE_ID}>\n\n"
-        f"وذلك بمعدل : ({winner_points}) نقطة .\n\n"
-        f"مع كامل الشكر لـــ ({leaders_mentions}) علئ ما قدموه\n\n"
-        "مُبارك لهم هذا التميز.\n\n"
-        "التوقيع :\n\n"
-        f"{signatures}\n\n"
-        "[|| @everyone || -- || @here ||]**"
-    )
-    await target_channel.send(content=final_msg)
-    bot_data["weekly_audit"] += 1
-    save_data(bot_data)
-
-@bot.tree.command(name="جرد_الكتائب_الشهري", description="إجراء جرد الكتائب الشهري")
-async def monthly_squad_audit(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True) # تم إضافة defer لتجنب خطأ التفكير
-    if not has_squad_audit_permission(interaction):
-        return await interaction.followup.send("**❌ عذراً، ليس لديك الصلاحية.**", ephemeral=True)
-        
-    await interaction.followup.send("**✅ تم بدء الجرد الشهري، يُرجى الانتظار 20 دقيقة للنتيجة النهائية.**", ephemeral=True)
-    
-    target_channel = interaction.guild.get_channel(SQUAD_AUDIT_TARGET_CHANNEL_ID) or interaction.channel
-    signatures = get_leaders_signatures(interaction.guild)
-    
-    initial_msg = (
-        "**| ﷽ |\n\n"
-        "بإسمنا نحن قيادة الكتائب:\n\n"
-        "`بــيـان قــيــادي قــادم بــعــد قلــيــل` \n\n"
-        "فـمـا يـخـص إعــلــان كــتــيـبــة الــشــهــر \n\n"
-        "التوقيع :\n\n"
-        f"{signatures}\n\n"
-        "[|| @everyone || -- || @here ||]**"
-    )
-    await target_channel.send(content=initial_msg)
-    
-    await asyncio.sleep(1200) # 20 minutes
-    start_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)
-    squad_scores = {}
-    for s_key, s_info in SQUADS_DATA.items():
-        total_msgs = bot_data["squad_points_adjustments"].get(s_key, 0)
-        for cid in s_info["channels"]:
-            ch = bot.get_channel(cid)
-            if ch:
-                async for msg in ch.history(after=start_date, limit=None):
-                    if not msg.author.bot: total_msgs += 1
-        squad_scores[s_key] = total_msgs
-        
-    winner_key = max(squad_scores, key=squad_scores.get)
-    winner_info = SQUADS_DATA[winner_key]
-    winner_points = squad_scores[winner_key]
-    
-    winner_role_obj = interaction.guild.get_role(MONTHLY_WINNER_ROLE_ID)
-    if winner_role_obj:
-        for lead_id in winner_info["leaders"]:
-            leader_member = interaction.guild.get_member(lead_id)
-            if leader_member:
-                try: await leader_member.add_roles(winner_role_obj)
-                except: pass
-                
-    leaders_mentions = " و ".join([f"معالي <@{lid}>" for lid in winner_info["leaders"]])
-    current_date = datetime.datetime.now().strftime("%Y/%m/%d")
-    count = bot_data["monthly_audit"]
-    
-    final_msg = (
-        "**| ﷽ |\n\n\n"
-        f"الرقم: ({count})\n"
-        f"التاريخ: ({current_date})\n\n"
-        "يسرنا الإعلان عن جرد الكتائب الشهري\n\n"
-        f"تُنصب كتيبة الشهر وهي : <@&{winner_info['role_id']}> .\n\n"
-        f"الحاصلين على رتبة : <@&{MONTHLY_WINNER_ROLE_ID}>\n\n"
-        f"وذلك بمعدل : ({winner_points}) نقطة .\n\n"
-        f"مع كامل الشكر لـــ ({leaders_mentions}) علئ ما قدموه\n\n"
-        "مُبارك لهم هذا التميز.\n\n"
-        "التوقيع :\n\n"
-        f"{signatures}\n\n"
-        "[|| @everyone || -- || @here ||]**"
-    )
-    await target_channel.send(content=final_msg)
-    bot_data["monthly_audit"] += 1
-    save_data(bot_data)
-
-
-# ==========================================
-# 9. نظام التقديم للكتائب (بدون فرز - يروح للإدارة مباشرة)
+# 8. التقديم للكتائب (المنيو والمودال)
 # ==========================================
 class AdminApplicationReviewView(discord.ui.View):
     def __init__(self, applicant: discord.Member, unit: str):
@@ -486,24 +325,18 @@ class AdminApplicationReviewView(discord.ui.View):
 
     @discord.ui.button(label="تم قبوله نهائيًا مُبارك له", style=discord.ButtonStyle.success)
     async def accept_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True) # تم إضافة defer لتجنب خطأ التفكير
-        
+        await interaction.response.defer(ephemeral=True) 
         if not any(role.id in LEADERS_ROLES for role in interaction.user.roles):
             return await interaction.followup.send("❌ ليس لديك صلاحية القبول.", ephemeral=True)
             
         await interaction.followup.send("**⚠️ أرفق صورة خلال دقيقتين للتأكيد (أرسل الصورة هنا في الشات)**", ephemeral=True)
-        
         def check(m): return m.author == interaction.user and m.channel == interaction.channel and m.attachments
-        try:
-            msg = await bot.wait_for('message', check=check, timeout=120.0)
+        try: msg = await bot.wait_for('message', check=check, timeout=120.0)
         except asyncio.TimeoutError:
             return await interaction.followup.send("❌ انتهى الوقت ولم يتم إرسال الصورة، أعد الضغط على الزر.", ephemeral=True)
 
         final_msg = (
             f"مُبارك قبولك في كتيبة بشكل كامل {{ {SQUADS_DATA[self.unit]['name']} }} يُرجى التشييك علئ كافة رومات الكتيبة المذكورة إعلاه لفهم النظام والقوانين المعتمدة .\n\n"
-            "كما نُحيطك علمًا بأنَ هذا القبول لقد آتئ بسبب جهدك وأجتيازك للأختبارات المُقررة من قبل قيادة الكتيبة .\n\n"
-            "مُبارك لك هذا التميز وأستمر علئ ما أنت عليه يا وحش .\n\n"
-            "( نسأل المولى - عز وجل التوفيق والسداد لنا ولك )\n\n"
             f"{self.applicant.mention}"
         )
         await interaction.channel.send(content=final_msg)
@@ -525,27 +358,18 @@ class AdminApplicationReviewView(discord.ui.View):
 
     @discord.ui.button(label="للأسف لم يتم قبوله", style=discord.ButtonStyle.danger)
     async def reject_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True) # تم إضافة defer لتجنب خطأ التفكير
-        
+        await interaction.response.defer(ephemeral=True) 
         if not any(role.id in LEADERS_ROLES for role in interaction.user.roles):
             return await interaction.followup.send("❌ ليس لديك صلاحية الرفض.", ephemeral=True)
             
         await interaction.followup.send("**⚠️ أرفق صورة خلال دقيقتين للتأكيد (أرسل الصورة هنا في الشات)**", ephemeral=True)
         def check(m): return m.author == interaction.user and m.channel == interaction.channel and m.attachments
-        try:
-            msg = await bot.wait_for('message', check=check, timeout=120.0)
+        try: msg = await bot.wait_for('message', check=check, timeout=120.0)
         except asyncio.TimeoutError:
             return await interaction.followup.send("❌ انتهى الوقت ولم يتم إرسال الصورة، أعد الضغط على الزر.", ephemeral=True)
 
-        rej_msg = (
-            f"للأسف لم يتم قبولك في كتيبة ( {SQUADS_DATA[self.unit]['name']} ) يُرجئ أعادة المحاولة مرة أخرئ .\n\n"
-            "( وذلك بسبب عدم أجتياز الإختبار الميداني )\n\n"
-            "حظ أوفر المرة القادمة لا تستسلم .\n\n"
-            "سائلن الله التوفيق والسداد لنا ولك\n\n"
-            f"{self.applicant.mention}"
-        )
+        rej_msg = f"للأسف لم يتم قبولك في كتيبة ( {SQUADS_DATA[self.unit]['name']} ) يُرجئ أعادة المحاولة مرة أخرئ .\n\n{self.applicant.mention}"
         await interaction.channel.send(content=rej_msg)
-        
         for child in self.children: child.disabled = True
         await interaction.message.edit(view=self)
 
@@ -563,173 +387,61 @@ class ApplicationModal(discord.ui.Modal):
     rank = discord.ui.TextInput(label="رتبتك بضباط (ضابط محكمة فما فوق)", required=True)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True) # تم إضافة defer لضمان عدم حصول Timeout
-
+        await interaction.response.defer(ephemeral=True)
         try: age_val = int(self.age.value)
         except: age_val = 0
         try: hours_val = int(self.hours.value)
         except: hours_val = 0
         
         if self.exp.value.strip() == "كلشيء":
-            try: await interaction.user.send("⚠️ تنبيه: يُمنع كتابة 'كلشيء' في خانة الخبرات عند التقديم.")
-            except: pass
-            return await interaction.followup.send("❌ تم رفض التقديم مبدئياً، راجع الخاص.", ephemeral=True)
+            return await interaction.followup.send("❌ يُمنع كتابة 'كلشيء' في خانة الخبرات. تم رفض التقديم.", ephemeral=True)
 
         if age_val < 16 or hours_val < 4 or self.resp.value.strip() != "نعم":
-            rej_msg = (
-                f"نتأسف لعدم قبولك في كتيبة ( {self.unit_name} ) يُرجئ أعادة المحاولة مرة أخرئ .\n\n"
-                "( يُرجئ التأكد من الشروط وهي هذه : العمر 16 وفوق وساعات التواجد 4 وفوق )\n\n"
-                "سائلن الله التوفيق والسداد لنا ولك\n\n"
-                f"{interaction.user.mention}"
-            )
-            try: await interaction.user.send(rej_msg)
-            except: pass
-            return await interaction.followup.send("❌ تم رفض التقديم مبدئياً لعدم استيفاء الشروط الأساسية.", ephemeral=True)
+            return await interaction.followup.send("❌ تم رفض التقديم لعدم استيفاء الشروط الأساسية (العمر أو الساعات).", ephemeral=True)
             
-        # إرسال التقديم مباشرة لروم الإدارة للمراجعة (بدون سحب)
         admin_channel = interaction.guild.get_channel(APPLICATIONS_LOG_CHANNEL_ID)
         if admin_channel:
             data_str = f"**الاسم:** {self.name.value}\n**العمر:** {self.age.value}\n**الخبرات:** {self.exp.value}\n**الساعات:** {self.hours.value}\n**الرتبة:** {self.rank.value}"
-            embed = discord.Embed(title=f"تقديم جديد مقترح: {self.unit_name}", description=data_str, color=discord.Color.blue())
+            embed = discord.Embed(title=f"تقديم جديد: {self.unit_name}", description=data_str, color=discord.Color.blue())
             view = AdminApplicationReviewView(applicant=interaction.user, unit=self.unit_key)
             await admin_channel.send(content="||@here|| تقديم جديد يحتاج مراجعتكم:", embed=embed, view=view)
             
-            # رسالة القبول المبدئي
-            acc_msg = (
-                f"مُبارك قبولك في كتيبة {{ {self.unit_name} }} يُرجى التشييك علئ كافة رومات الكتيبة المذكورة إعلاه لفهم النظام والقوانين المعتمدة .\n\n"
-                "كما نُحيطك علمًا بأنَ هذا القبول يُعتبر قبول مبدئي القبول النهائي يُحدد من قبل مسؤولين الكتيبة بوقت آخر ليتم قبولك بشكل نهائي .\n\n"
-                "( نسأل المولى - عز وجل التوفيق والسداد لنا ولك )\n\n"
-                f"{interaction.user.mention}\n{ACCEPT_INITIAL_IMG}"
-            )
-            try: await interaction.user.send(acc_msg)
+            try: await interaction.user.send(f"مُبارك قبولك المبدئي في {{ {self.unit_name} }}\n{ACCEPT_INITIAL_IMG}")
             except: pass
 
-        await interaction.followup.send("✅ تم إرسال تقديمك بنجاح. سيتم مراجعته من الإدارة مباشرة.", ephemeral=True)
+        await interaction.followup.send("✅ تم إرسال تقديمك بنجاح. سيتم مراجعته من الإدارة.", ephemeral=True)
 
+# 🔴 هنا التعديل الأهم: إضافة custom_id لكل زر عشان يصير دائم وما يطفي
 class ApplicationMenuView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=None)
+    def __init__(self): 
+        super().__init__(timeout=None) 
 
-    @discord.ui.button(label="التقديم على وحدة إلقاء القبض 🕵️", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="التقديم على وحدة إلقاء القبض 🕵️", style=discord.ButtonStyle.danger, custom_id="app_btn_unit")
     async def btn_unit(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ApplicationModal("unit", "وحدة إلقاء القبض"))
 
-    @discord.ui.button(label="التقديم على كتيبة E.C.O ⚡", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="التقديم على كتيبة E.C.O ⚡", style=discord.ButtonStyle.success, custom_id="app_btn_eco")
     async def btn_eco(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ApplicationModal("eco", "E.C.O"))
 
-    @discord.ui.button(label="التقديم على كتيبة الطيران 🚁", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="التقديم على كتيبة الطيران 🚁", style=discord.ButtonStyle.primary, custom_id="app_btn_air")
     async def btn_air(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ApplicationModal("air", "الطيران"))
 
+
 @bot.tree.command(name="إستدعاء_التقديم_علئ_الكتائب", description="يستدعي منيو التقديم للكتائب")
 async def summon_applications(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True) # تم إضافة defer لضمان الاستجابة السريعة
+    # مسحت الـ defer من هنا لأنها كانت تسبب تأخير أحياناً بفتح الرسالة
     if not interaction.user.guild_permissions.administrator:
-        return await interaction.followup.send("❌ هذا الأمر للأدمن فقط.", ephemeral=True)
+        return await interaction.response.send_message("❌ هذا الأمر للأدمن فقط.", ephemeral=True)
     
     embed = discord.Embed(title="نظام تقديم كتائب وزارة العدل", description="للتقديم اختار أحد الكتائب التالية:", color=discord.Color.dark_grey())
     embed.set_image(url=MENU_IMAGE_URL)
     view = ApplicationMenuView()
     await interaction.channel.send(embed=embed, view=view)
-    await interaction.followup.send("✅ تم استدعاء المنيو بنجاح.", ephemeral=True)
-
-
-# ==========================================
-# 10. أوامر إضافة وخصم الساعات والنقاط
-# ==========================================
-@bot.tree.command(name="إضافة_ساعات", description="يضيف ساعات للشخص عبر المنشن")
-@app_commands.describe(user="الشخص", hours="ساعات", minutes="دقائق", seconds="ثواني")
-async def add_hours(interaction: discord.Interaction, user: discord.Member, hours: int = 0, minutes: int = 0, seconds: int = 0):
-    await interaction.response.defer(ephemeral=False)
-    if ADMIN_ROLE_ID not in [r.id for r in interaction.user.roles] and not interaction.user.guild_permissions.administrator:
-        return await interaction.followup.send("❌ ليس لديك صلاحية.", ephemeral=True)
-    
-    total_seconds = (hours * 3600) + (minutes * 60) + seconds
-    bot_data["time_adjustments"][str(user.id)] = bot_data["time_adjustments"].get(str(user.id), 0) + total_seconds
-    save_data(bot_data)
-    await interaction.followup.send(f"✅ تم إضافة `{hours}س و {minutes}د و {seconds}ث` لـ {user.mention}.")
-
-@bot.tree.command(name="خصم_ساعات_ورقة_حضور", description="يخصم ساعات للشخص عبر المنشن")
-@app_commands.describe(user="الشخص", hours="ساعات", minutes="دقائق", seconds="ثواني")
-async def sub_hours(interaction: discord.Interaction, user: discord.Member, hours: int = 0, minutes: int = 0, seconds: int = 0):
-    await interaction.response.defer(ephemeral=False)
-    if ADMIN_ROLE_ID not in [r.id for r in interaction.user.roles] and not interaction.user.guild_permissions.administrator:
-        return await interaction.followup.send("❌ ليس لديك صلاحية.", ephemeral=True)
-    
-    total_seconds = (hours * 3600) + (minutes * 60) + seconds
-    bot_data["time_adjustments"][str(user.id)] = bot_data["time_adjustments"].get(str(user.id), 0) - total_seconds
-    save_data(bot_data)
-    await interaction.followup.send(f"✅ تم خصم `{hours}س و {minutes}د و {seconds}ث` من {user.mention}.")
-
-@bot.tree.command(name="إضافة_نقاط_كتيبة", description="يضيف نقاط للكتيبة في الجرد")
-@app_commands.choices(squad=[
-    app_commands.Choice(name="وحدة إلقاء القبض", value="unit"),
-    app_commands.Choice(name="E.C.O", value="eco"),
-    app_commands.Choice(name="الطيران", value="air")
-])
-async def add_points(interaction: discord.Interaction, squad: app_commands.Choice[str], points: int):
-    await interaction.response.defer(ephemeral=False)
-    if not has_squad_audit_permission(interaction): return await interaction.followup.send("❌ ليس لديك صلاحية.", ephemeral=True)
-    
-    bot_data["squad_points_adjustments"][squad.value] += points
-    save_data(bot_data)
-    await interaction.followup.send(f"✅ تم إضافة `{points}` نقطة لكتيبة {squad.name}.")
-
-@bot.tree.command(name="خصم_نقاط_للكتائب", description="يخصم نقاط من الكتيبة في الجرد")
-@app_commands.choices(squad=[
-    app_commands.Choice(name="وحدة إلقاء القبض", value="unit"),
-    app_commands.Choice(name="E.C.O", value="eco"),
-    app_commands.Choice(name="الطيران", value="air")
-])
-async def sub_points(interaction: discord.Interaction, squad: app_commands.Choice[str], points: int):
-    await interaction.response.defer(ephemeral=False)
-    if not has_squad_audit_permission(interaction): return await interaction.followup.send("❌ ليس لديك صلاحية.", ephemeral=True)
-    
-    bot_data["squad_points_adjustments"][squad.value] -= points
-    save_data(bot_data)
-    await interaction.followup.send(f"✅ تم خصم `{points}` نقطة من كتيبة {squad.name}.")
+    await interaction.response.send_message("✅ تم استدعاء المنيو بنجاح.", ephemeral=True)
 
 # ==========================================
-# 11. الجرد الأسبوعي للحضور
+# تشغيل البوت
 # ==========================================
-@bot.tree.command(name="الجرد_الأسبوعي", description="يجرد معدل الدخول والخروج للأسبوع الماضي")
-@app_commands.checks.has_role(ADMIN_ROLE_ID)
-async def attendance_weekly_audit(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    now = datetime.datetime.now(datetime.timezone.utc)
-    last_week = now - datetime.timedelta(days=7)
-    users_stats = {}
-    for record in attendance_history:
-        if record["logout"] >= last_week:
-            uid = record["user_id"]
-            users_stats[uid] = users_stats.get(uid, 0) + (record["logout"] - record["login"]).total_seconds()
-            
-    for uid_str, adj in bot_data["time_adjustments"].items():
-        uid = int(uid_str)
-        if uid in users_stats: users_stats[uid] += adj
-        else: users_stats[uid] = adj
-            
-    embed = discord.Embed(title="الجرد الأسبوعي للمحامين", color=discord.Color.dark_blue())
-    if not users_stats:
-        embed.description = "**لا توجد بيانات للأسبوع الماضي.**"
-        return await interaction.followup.send(embed=embed)
-        
-    desc = ""
-    for uid, seconds in sorted(users_stats.items(), key=lambda x: x[1], reverse=True):
-        if seconds <= 0: continue 
-        member = interaction.guild.get_member(uid)
-        name = member.mention if member else f"ID: {uid}"
-        desc += f"{name}\nإجمالي الوقت: **{round(seconds / 3600, 2)} ساعة**\n\n"
-        
-    embed.description = desc
-    await interaction.followup.send(embed=embed)
-
-@bot.tree.error
-async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    msg = "**❌ حدث خطأ أو ليس لديك الصلاحية لاستخدام الأمر.**"
-    try:
-        if not interaction.response.is_done(): await interaction.response.send_message(msg, ephemeral=True)
-        else: await interaction.followup.send(msg, ephemeral=True)
-    except: pass
-
 bot.run(os.getenv('TOKEN'))
