@@ -232,7 +232,7 @@ async def before_check():
 
 @bot.event
 async def on_ready():
-    bot.add_view(ApplicationMenuView()) # 🔴 تم إضافة هذا السطر لحفظ أزرار المنيو بشكل دائم
+    bot.add_view(ApplicationMenuView()) 
     await bot.tree.sync()
     keep_alive_task.start()
     check_offline_status.start()
@@ -315,7 +315,154 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
 # ==========================================
-# 8. التقديم للكتائب (المنيو والمودال)
+# 8. الجرد الأسبوعي والشهري
+# ==========================================
+@bot.tree.command(name="جرد_الكتائب_الأسبوعي", description="إجراء جرد الكتائب الأسبوعي")
+async def weekly_squad_audit(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True) 
+    if not has_squad_audit_permission(interaction):
+        return await interaction.followup.send("**❌ عذراً، ليس لديك الصلاحية.**", ephemeral=True)
+    
+    await interaction.followup.send("**✅ تم بدء الجرد الأسبوعي، يُرجى الانتظار 20 دقيقة للنتيجة النهائية.**", ephemeral=True)
+    
+    target_channel = interaction.guild.get_channel(SQUAD_AUDIT_TARGET_CHANNEL_ID) or interaction.channel
+    signatures = get_leaders_signatures(interaction.guild)
+    
+    initial_msg = (
+        "**| ﷽ |\n\n"
+        "السلام عليكم ورحمة الله وبركاته .\n"
+        "والصلاة والسلام على أشرف الأنبياء والمرسلين .\n"
+        "أسعد الله أوقاتكم بكل خير .\n\n"
+        "تحية طيبة أما بعد :\n\n"
+        "بإسمنا نحن قيادة الكتائب:\n\n"
+        "`بــيـان قــيــادي قــادم بــعــد قلــيــل` \n\n"
+        "فـمـا يـخـص إعــلــان كــتــيـبــة الــأســبوع \n\n"
+        "سائلين الله التوفيق والسداد...\n\n"
+        "يبلغ أمرنا هذا للجهات المختصة فور صدوره .\n\n"
+        "التوقيع :\n\n"
+        f"{signatures}\n\n"
+        "[|| @everyone || -- || @here ||]**"
+    )
+    await target_channel.send(content=initial_msg)
+    
+    await asyncio.sleep(1200) # انتظار 20 دقيقة
+    start_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
+    squad_scores = {}
+    for s_key, s_info in SQUADS_DATA.items():
+        total_msgs = bot_data["squad_points_adjustments"].get(s_key, 0)
+        for cid in s_info["channels"]:
+            ch = bot.get_channel(cid)
+            if ch:
+                async for msg in ch.history(after=start_date, limit=None):
+                    if not msg.author.bot: total_msgs += 1
+        squad_scores[s_key] = total_msgs
+        
+    winner_key = max(squad_scores, key=squad_scores.get)
+    winner_info = SQUADS_DATA[winner_key]
+    winner_points = squad_scores[winner_key]
+    
+    winner_role_obj = interaction.guild.get_role(WEEKLY_WINNER_ROLE_ID)
+    if winner_role_obj:
+        for lead_id in winner_info["leaders"]:
+            leader_member = interaction.guild.get_member(lead_id)
+            if leader_member:
+                try: await leader_member.add_roles(winner_role_obj)
+                except: pass
+                
+    leaders_mentions = " و ".join([f"معالي <@{lid}>" for lid in winner_info["leaders"]])
+    current_date = datetime.datetime.now().strftime("%Y/%m/%d")
+    count = bot_data["weekly_audit"]
+    
+    final_msg = (
+        "**| ﷽ |\n\n\n"
+        f"الرقم: ({count})\n"
+        f"التاريخ: ({current_date})\n\n"
+        "السلام عليكم ورحمة الله وبركاته .\n"
+        "أسعد الله أوقاتكم بكل خير .\n\n"
+        "يسرنا الإعلان عن جرد الكتائب الأسبوعي\n\n"
+        f"تُنصب كتيبة الأسبوع وهي : <@&{winner_info['role_id']}> .\n\n"
+        f"الحاصلين على رتبة : <@&{WEEKLY_WINNER_ROLE_ID}>\n\n"
+        f"وذلك بمعدل : ({winner_points}) نقطة .\n\n"
+        f"مع كامل الشكر لـــ ({leaders_mentions}) علئ ما قدموه\n\n"
+        "مُبارك لهم هذا التميز.\n\n"
+        "التوقيع :\n\n"
+        f"{signatures}\n\n"
+        "[|| @everyone || -- || @here ||]**"
+    )
+    await target_channel.send(content=final_msg)
+    bot_data["weekly_audit"] += 1
+    save_data(bot_data)
+
+@bot.tree.command(name="جرد_الكتائب_الشهري", description="إجراء جرد الكتائب الشهري")
+async def monthly_squad_audit(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    if not has_squad_audit_permission(interaction):
+        return await interaction.followup.send("**❌ عذراً، ليس لديك الصلاحية.**", ephemeral=True)
+        
+    await interaction.followup.send("**✅ تم بدء الجرد الشهري، يُرجى الانتظار 20 دقيقة للنتيجة النهائية.**", ephemeral=True)
+    
+    target_channel = interaction.guild.get_channel(SQUAD_AUDIT_TARGET_CHANNEL_ID) or interaction.channel
+    signatures = get_leaders_signatures(interaction.guild)
+    
+    initial_msg = (
+        "**| ﷽ |\n\n"
+        "بإسمنا نحن قيادة الكتائب:\n\n"
+        "`بــيـان قــيــادي قــادم بــعــد قلــيــل` \n\n"
+        "فـمـا يـخـص إعــلــان كــتــيـبــة الــشــهــر \n\n"
+        "التوقيع :\n\n"
+        f"{signatures}\n\n"
+        "[|| @everyone || -- || @here ||]**"
+    )
+    await target_channel.send(content=initial_msg)
+    
+    await asyncio.sleep(1200)
+    start_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)
+    squad_scores = {}
+    for s_key, s_info in SQUADS_DATA.items():
+        total_msgs = bot_data["squad_points_adjustments"].get(s_key, 0)
+        for cid in s_info["channels"]:
+            ch = bot.get_channel(cid)
+            if ch:
+                async for msg in ch.history(after=start_date, limit=None):
+                    if not msg.author.bot: total_msgs += 1
+        squad_scores[s_key] = total_msgs
+        
+    winner_key = max(squad_scores, key=squad_scores.get)
+    winner_info = SQUADS_DATA[winner_key]
+    winner_points = squad_scores[winner_key]
+    
+    winner_role_obj = interaction.guild.get_role(MONTHLY_WINNER_ROLE_ID)
+    if winner_role_obj:
+        for lead_id in winner_info["leaders"]:
+            leader_member = interaction.guild.get_member(lead_id)
+            if leader_member:
+                try: await leader_member.add_roles(winner_role_obj)
+                except: pass
+                
+    leaders_mentions = " و ".join([f"معالي <@{lid}>" for lid in winner_info["leaders"]])
+    current_date = datetime.datetime.now().strftime("%Y/%m/%d")
+    count = bot_data["monthly_audit"]
+    
+    final_msg = (
+        "**| ﷽ |\n\n\n"
+        f"الرقم: ({count})\n"
+        f"التاريخ: ({current_date})\n\n"
+        "يسرنا الإعلان عن جرد الكتائب الشهري\n\n"
+        f"تُنصب كتيبة الشهر وهي : <@&{winner_info['role_id']}> .\n\n"
+        f"الحاصلين على رتبة : <@&{MONTHLY_WINNER_ROLE_ID}>\n\n"
+        f"وذلك بمعدل : ({winner_points}) نقطة .\n\n"
+        f"مع كامل الشكر لـــ ({leaders_mentions}) علئ ما قدموه\n\n"
+        "مُبارك لهم هذا التميز.\n\n"
+        "التوقيع :\n\n"
+        f"{signatures}\n\n"
+        "[|| @everyone || -- || @here ||]**"
+    )
+    await target_channel.send(content=final_msg)
+    bot_data["monthly_audit"] += 1
+    save_data(bot_data)
+
+# ==========================================
+# 9. التقديم للكتائب (المنيو والمودال) - 5 خانات
 # ==========================================
 class AdminApplicationReviewView(discord.ui.View):
     def __init__(self, applicant: discord.Member, unit: str):
@@ -379,10 +526,10 @@ class ApplicationModal(discord.ui.Modal):
         self.unit_key = unit_key
         self.unit_name = unit_name
 
+    # تم تصحيح الخانات لتكون 5 فقط (الحد الأقصى لديسكورد)
     name = discord.ui.TextInput(label="الإسم", required=True)
     age = discord.ui.TextInput(label="العُمر (16 فما فوق)", required=True)
     exp = discord.ui.TextInput(label="الخبرات", style=discord.TextStyle.paragraph, required=True)
-    resp = discord.ui.TextInput(label="هل مُستعد لتحمل المسؤولية؟ (نعم/لا)", required=True)
     hours = discord.ui.TextInput(label="ساعات التواجد (4 فما فوق)", required=True)
     rank = discord.ui.TextInput(label="رتبتك بضباط (ضابط محكمة فما فوق)", required=True)
 
@@ -396,7 +543,7 @@ class ApplicationModal(discord.ui.Modal):
         if self.exp.value.strip() == "كلشيء":
             return await interaction.followup.send("❌ يُمنع كتابة 'كلشيء' في خانة الخبرات. تم رفض التقديم.", ephemeral=True)
 
-        if age_val < 16 or hours_val < 4 or self.resp.value.strip() != "نعم":
+        if age_val < 16 or hours_val < 4:
             return await interaction.followup.send("❌ تم رفض التقديم لعدم استيفاء الشروط الأساسية (العمر أو الساعات).", ephemeral=True)
             
         admin_channel = interaction.guild.get_channel(APPLICATIONS_LOG_CHANNEL_ID)
@@ -411,7 +558,6 @@ class ApplicationModal(discord.ui.Modal):
 
         await interaction.followup.send("✅ تم إرسال تقديمك بنجاح. سيتم مراجعته من الإدارة.", ephemeral=True)
 
-# 🔴 هنا التعديل الأهم: إضافة custom_id لكل زر عشان يصير دائم وما يطفي
 class ApplicationMenuView(discord.ui.View):
     def __init__(self): 
         super().__init__(timeout=None) 
@@ -431,7 +577,6 @@ class ApplicationMenuView(discord.ui.View):
 
 @bot.tree.command(name="إستدعاء_التقديم_علئ_الكتائب", description="يستدعي منيو التقديم للكتائب")
 async def summon_applications(interaction: discord.Interaction):
-    # مسحت الـ defer من هنا لأنها كانت تسبب تأخير أحياناً بفتح الرسالة
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ هذا الأمر للأدمن فقط.", ephemeral=True)
     
@@ -442,6 +587,101 @@ async def summon_applications(interaction: discord.Interaction):
     await interaction.response.send_message("✅ تم استدعاء المنيو بنجاح.", ephemeral=True)
 
 # ==========================================
-# تشغيل البوت
+# 10. أوامر إضافة وخصم الساعات والنقاط
 # ==========================================
+@bot.tree.command(name="إضافة_ساعات", description="يضيف ساعات للشخص عبر المنشن")
+@app_commands.describe(user="الشخص", hours="ساعات", minutes="دقائق", seconds="ثواني")
+async def add_hours(interaction: discord.Interaction, user: discord.Member, hours: int = 0, minutes: int = 0, seconds: int = 0):
+    await interaction.response.defer(ephemeral=False)
+    if ADMIN_ROLE_ID not in [r.id for r in interaction.user.roles] and not interaction.user.guild_permissions.administrator:
+        return await interaction.followup.send("❌ ليس لديك صلاحية.", ephemeral=True)
+    
+    total_seconds = (hours * 3600) + (minutes * 60) + seconds
+    bot_data["time_adjustments"][str(user.id)] = bot_data["time_adjustments"].get(str(user.id), 0) + total_seconds
+    save_data(bot_data)
+    await interaction.followup.send(f"✅ تم إضافة `{hours}س و {minutes}د و {seconds}ث` لـ {user.mention}.")
+
+@bot.tree.command(name="خصم_ساعات_ورقة_حضور", description="يخصم ساعات للشخص عبر المنشن")
+@app_commands.describe(user="الشخص", hours="ساعات", minutes="دقائق", seconds="ثواني")
+async def sub_hours(interaction: discord.Interaction, user: discord.Member, hours: int = 0, minutes: int = 0, seconds: int = 0):
+    await interaction.response.defer(ephemeral=False)
+    if ADMIN_ROLE_ID not in [r.id for r in interaction.user.roles] and not interaction.user.guild_permissions.administrator:
+        return await interaction.followup.send("❌ ليس لديك صلاحية.", ephemeral=True)
+    
+    total_seconds = (hours * 3600) + (minutes * 60) + seconds
+    bot_data["time_adjustments"][str(user.id)] = bot_data["time_adjustments"].get(str(user.id), 0) - total_seconds
+    save_data(bot_data)
+    await interaction.followup.send(f"✅ تم خصم `{hours}س و {minutes}د و {seconds}ث` من {user.mention}.")
+
+@bot.tree.command(name="إضافة_نقاط_كتيبة", description="يضيف نقاط للكتيبة في الجرد")
+@app_commands.choices(squad=[
+    app_commands.Choice(name="وحدة إلقاء القبض", value="unit"),
+    app_commands.Choice(name="E.C.O", value="eco"),
+    app_commands.Choice(name="الطيران", value="air")
+])
+async def add_points(interaction: discord.Interaction, squad: app_commands.Choice[str], points: int):
+    await interaction.response.defer(ephemeral=False)
+    if not has_squad_audit_permission(interaction): return await interaction.followup.send("❌ ليس لديك صلاحية.", ephemeral=True)
+    
+    bot_data["squad_points_adjustments"][squad.value] += points
+    save_data(bot_data)
+    await interaction.followup.send(f"✅ تم إضافة `{points}` نقطة لكتيبة {squad.name}.")
+
+@bot.tree.command(name="خصم_نقاط_للكتائب", description="يخصم نقاط من الكتيبة في الجرد")
+@app_commands.choices(squad=[
+    app_commands.Choice(name="وحدة إلقاء القبض", value="unit"),
+    app_commands.Choice(name="E.C.O", value="eco"),
+    app_commands.Choice(name="الطيران", value="air")
+])
+async def sub_points(interaction: discord.Interaction, squad: app_commands.Choice[str], points: int):
+    await interaction.response.defer(ephemeral=False)
+    if not has_squad_audit_permission(interaction): return await interaction.followup.send("❌ ليس لديك صلاحية.", ephemeral=True)
+    
+    bot_data["squad_points_adjustments"][squad.value] -= points
+    save_data(bot_data)
+    await interaction.followup.send(f"✅ تم خصم `{points}` نقطة من كتيبة {squad.name}.")
+
+# ==========================================
+# 11. الجرد الأسبوعي للحضور
+# ==========================================
+@bot.tree.command(name="الجرد_الأسبوعي", description="يجرد معدل الدخول والخروج للأسبوع الماضي")
+@app_commands.checks.has_role(ADMIN_ROLE_ID)
+async def attendance_weekly_audit(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    last_week = now - datetime.timedelta(days=7)
+    users_stats = {}
+    for record in attendance_history:
+        if record["logout"] >= last_week:
+            uid = record["user_id"]
+            users_stats[uid] = users_stats.get(uid, 0) + (record["logout"] - record["login"]).total_seconds()
+            
+    for uid_str, adj in bot_data["time_adjustments"].items():
+        uid = int(uid_str)
+        if uid in users_stats: users_stats[uid] += adj
+        else: users_stats[uid] = adj
+            
+    embed = discord.Embed(title="الجرد الأسبوعي للمحامين", color=discord.Color.dark_blue())
+    if not users_stats:
+        embed.description = "**لا توجد بيانات للأسبوع الماضي.**"
+        return await interaction.followup.send(embed=embed)
+        
+    desc = ""
+    for uid, seconds in sorted(users_stats.items(), key=lambda x: x[1], reverse=True):
+        if seconds <= 0: continue 
+        member = interaction.guild.get_member(uid)
+        name = member.mention if member else f"ID: {uid}"
+        desc += f"{name}\nإجمالي الوقت: **{round(seconds / 3600, 2)} ساعة**\n\n"
+        
+    embed.description = desc
+    await interaction.followup.send(embed=embed)
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    msg = "**❌ حدث خطأ أو ليس لديك الصلاحية لاستخدام الأمر.**"
+    try:
+        if not interaction.response.is_done(): await interaction.response.send_message(msg, ephemeral=True)
+        else: await interaction.followup.send(msg, ephemeral=True)
+    except: pass
+
 bot.run(os.getenv('TOKEN'))
