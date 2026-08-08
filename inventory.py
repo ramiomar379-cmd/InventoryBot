@@ -683,5 +683,36 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         if not interaction.response.is_done(): await interaction.response.send_message(msg, ephemeral=True)
         else: await interaction.followup.send(msg, ephemeral=True)
     except: pass
+        # ==========================================
+# أمر مسح الرسائل (!مسح)
+# ==========================================
+@bot.command(name="مسح", aliases=["clear"])
+@commands.has_permissions(manage_messages=True)
+async def clear_messages(ctx, amount: int = 10):
+    try:
+        # amount + 1 عشان يمسح رسالة الأمر نفسها مع العدد المطلوب
+        deleted = await ctx.channel.purge(limit=amount + 1)
+        
+        # رسالة تأكيد تنحذف تلقائياً بعد 3 ثواني
+        confirm_msg = await ctx.send(f"✅ **تم مسح {len(deleted)-1} رسالة بنجاح بواسطة {ctx.author.mention}.**")
+        await asyncio.sleep(3)
+        await confirm_msg.delete()
+        
+        # تسجيل الحدث في لوق الأوامر
+        await send_custom_log(
+            "🗑️ لوق مسح رسائل", 
+            f"الشخص: {ctx.author.mention}\nالروم: {ctx.channel.mention}\nالعدد: {len(deleted)-1}", 
+            channel_id=GENERAL_CUSTOM_LOG_ID, 
+            color=discord.Color.red()
+        )
+    except Exception as e:
+        await ctx.send("❌ **حدث خطأ أثناء محاولة مسح الرسائل. تأكد من إعطاء البوت صلاحيات Manage Messages!**")
+
+@clear_messages.error
+async def clear_messages_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        msg = await ctx.send("❌ **عذراً، ما عندك صلاحية (Manage Messages) عشان تستخدم هذا الأمر!**")
+        await asyncio.sleep(3)
+        await msg.delete()
 
 bot.run(os.getenv('TOKEN'))
