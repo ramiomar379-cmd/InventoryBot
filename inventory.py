@@ -2,9 +2,30 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import asyncio
+import os
+from flask import Flask
+from threading import Thread
 
 # ==========================================
-# إعدادات البوت الأساسية
+# 🌐 نظام إبقاء البوت متصلاً (لإرضاء منصة Render)
+# ==========================================
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "✅ البوت يعمل بنجاح ومستقر على منصة Render!"
+
+def run():
+    # Render يحدد المنفذ (Port) تلقائياً، وإذا لم يجده يستخدم 8080
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+# ==========================================
+# 🤖 إعدادات البوت الأساسية
 # ==========================================
 class MyBot(commands.Bot):
     def __init__(self):
@@ -21,7 +42,7 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 
-# بيانات الكتائب (أضف أو عدل عليها حسب سيرفرك)
+# بيانات الكتائب
 SQUADS_DATA = {
     "eco": {"name": "الكتيبة الاقتصادية"},
     "air": {"name": "كتيبة الطيران"},
@@ -40,10 +61,12 @@ async def clear_messages(ctx, amount: int = 10):
         await asyncio.sleep(3)
         await confirm_msg.delete()
     except Exception as e:
-        await ctx.send("❌ **حدث خطأ، تأكد من صلاحيات البوت!**")
+        msg = await ctx.send("❌ **حدث خطأ، تأكد من إعطاء البوت صلاحية Manage Messages!**")
+        await asyncio.sleep(3)
+        await msg.delete()
 
 # ==========================================
-# 2. نظام التقديمات (القبول والرفض مع المنيو للأسباب)
+# 2. نظام التقديمات (القبول والرفض مع الأسباب)
 # ==========================================
 class RejectReasonModal(discord.ui.Modal, title='سبب الرفض'):
     reason = discord.ui.TextInput(label='أدخل سبب الرفض (الأخطاء أو الشروط)', style=discord.TextStyle.long)
@@ -58,19 +81,19 @@ class RejectReasonModal(discord.ui.Modal, title='سبب الرفض'):
         squad_name = SQUADS_DATA.get(self.unit, {}).get('name', 'الكتيبة')
         
         if self.is_initial:
-            msg = (f"**نتأسف لعدم قبولك في كتيبة ( {squad_name} ) يُرجئ أعادة المحاولة مرة أخرئ .**\n"
-                   f"**( يُرجئ التأكد من الشروط وهي هذه : {self.reason.value} )**\n"
+            msg = (f"**نتأسف لعدم قبولك في كتيبة ( {squad_name} ) يُرجئ أعادة المحاولة مرة أخرئ .**\n\n"
+                   f"**( يُرجئ التأكد من الشروط وهي هذه : {self.reason.value} )**\n\n"
                    f"**سائلين الله التوفيق والسداد لنا ولك**\n\n**{self.applicant.mention}**")
         else:
-            msg = (f"**للأسف لم يتم قبولك في كتيبة ( {squad_name} ) يُرجئ أعادة المحاولة مرة أخرئ .**\n"
-                   f"**( وذلك بسبب عدم أجتياز الإختبار الميداني: {self.reason.value} )**\n"
-                   f"**حظ أوفر المرة القادمة لا تستسلم .**\n"
+            msg = (f"**للأسف لم يتم قبولك في كتيبة ( {squad_name} ) يُرجئ أعادة المحاولة مرة أخرئ .**\n\n"
+                   f"**( وذلك بسبب عدم أجتياز الإختبار الميداني: {self.reason.value} )**\n\n"
+                   f"**حظ أوفر المرة القادمة لا تستسلم .**\n\n"
                    f"**سائلين الله التوفيق والسداد لنا ولك**\n\n**{self.applicant.mention}**")
         try:
             await self.applicant.send(msg)
-            await interaction.response.send_message(f"✅ **تم إرسال الرفض لـ {self.applicant.mention}**")
+            await interaction.response.send_message(f"✅ **تم إرسال الرفض لـ {self.applicant.mention}**", ephemeral=True)
         except:
-            await interaction.response.send_message(f"⚠️ **الخاص مقفل! الرسالة:**\n{msg}")
+            await interaction.response.send_message(f"⚠️ **عذراً، خاص العضو مقفل! الرسالة:**\n{msg}", ephemeral=True)
 
 class AdminApplicationReviewView(discord.ui.View):
     def __init__(self, applicant: discord.Member, unit: str):
@@ -88,9 +111,9 @@ class AdminApplicationReviewView(discord.ui.View):
         try:
             await self.applicant.send(content=msg)
             await self.applicant.send(content=img_url)
-            await interaction.response.send_message(f"✅ **تم إرسال القبول المبدئي.**")
+            await interaction.response.send_message(f"✅ **تم إرسال القبول المبدئي للعضو.**", ephemeral=True)
         except:
-            await interaction.response.send_message(f"⚠️ **الخاص مقفل!**\n{msg}\n{img_url}")
+            await interaction.response.send_message(f"⚠️ **الخاص مقفل!**\n{msg}\n{img_url}", ephemeral=True)
 
     @discord.ui.button(label="قبول نهائي", style=discord.ButtonStyle.success, custom_id="acc_final")
     async def accept_final(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -102,9 +125,9 @@ class AdminApplicationReviewView(discord.ui.View):
         try:
             await self.applicant.send(content=msg)
             await self.applicant.send(content=img_url)
-            await interaction.response.send_message(f"✅ **تم إرسال القبول النهائي.**")
+            await interaction.response.send_message(f"✅ **تم إرسال القبول النهائي للعضو.**", ephemeral=True)
         except:
-            await interaction.response.send_message(f"⚠️ **الخاص مقفل!**\n{msg}\n{img_url}")
+            await interaction.response.send_message(f"⚠️ **الخاص مقفل!**\n{msg}\n{img_url}", ephemeral=True)
 
     @discord.ui.button(label="رفض مبدئي", style=discord.ButtonStyle.danger, custom_id="rej_init")
     async def reject_init(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -114,36 +137,34 @@ class AdminApplicationReviewView(discord.ui.View):
     async def reject_final(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(RejectReasonModal(self.applicant, self.unit, is_initial=False))
 
-
 # ==========================================
 # 3. نظام البنك المركزي (لوحة التحكم والتعميمات)
 # ==========================================
-
-# المنيو الخاصة بإزالة المخالفة
 class RemovePenaltyModal(discord.ui.Modal, title='إزالة مخالفة ورفع التعميم'):
     msg_id = discord.ui.TextInput(label='آيدي رسالة التعميم (Message ID)', style=discord.TextStyle.short)
     reason = discord.ui.TextInput(label='سبب الإزالة ولماذا؟', style=discord.TextStyle.long)
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        channel = interaction.guild.get_channel(1536074561567727656) # روم التعميمات
+        # تأكد من أن هذا هو آيدي روم التعميمات الصحيح
+        channel = interaction.guild.get_channel(1536074561567727656) 
+        if not channel:
+            return await interaction.followup.send("❌ **لم أتمكن من إيجاد روم التعميمات!**", ephemeral=True)
+
         try:
             target_msg = await channel.fetch_message(int(self.msg_id.value))
-            # تعديل الإمبد القديم للون الأخضر للإشارة أنه انتهى
             if target_msg.embeds:
                 embed = target_msg.embeds[0]
                 embed.color = discord.Color.green()
                 embed.title = "✅ | [مُنتهية] تعميم رسمي من البنك المركزي"
                 await target_msg.edit(embed=embed)
             
-            # الرد على التعميم
             reply_msg = f"**✅ تم الإنتهاء ويتم إزالة التعميم.**\n**السبب:** {self.reason.value}\n**بواسطة:** {interaction.user.mention}"
             await target_msg.reply(reply_msg)
             await interaction.followup.send("✅ **تم إزالة التعميم وتحديث الرسالة بنجاح.**", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send("❌ **لم أتمكن من العثور على الرسالة، تأكد من الآيدي.**", ephemeral=True)
+            await interaction.followup.send("❌ **لم أتمكن من العثور على الرسالة، تأكد من نسخ الآيدي بشكل صحيح.**", ephemeral=True)
 
-# المنيو الخاصة بتحرير المخالفة (الخطوة الأولى)
 class IssuePenaltyModal(discord.ui.Modal, title='تحرير مخالفة عدم سداد'):
     name = discord.ui.TextInput(label='الإسم ( إن وجد )', required=False)
     player_id = discord.ui.TextInput(label='الإيدي (رقم الهوية)', required=True)
@@ -173,25 +194,23 @@ class IssuePenaltyModal(discord.ui.Modal, title='تحرير مخالفة عدم 
             embed.add_field(name="🚓 الكتيبة الموجهة", value=f"**{self.squad.value}**", inline=True)
             embed.set_footer(text=f"تم الإصدار بواسطة: {interaction.user.display_name}")
 
-            # إضافة الصورة الأولى للإمبد الأساسي
+            # الصورة الأولى كصورة رئيسية للإمبد
             if msg.attachments:
                 embed.set_image(url=msg.attachments[0].url)
 
             await target_channel.send(content="@here **🚨 تعميم مالي جديد!**", embed=embed)
             
-            # إذا فيه صور إضافية يرسلها كرسائل مرتبطة
+            # باقي الصور كرسائل ملحقة
             if len(msg.attachments) > 1:
-                for attachment in msg.attachments[1:4]: # بحد أقصى 4 صور
+                for attachment in msg.attachments[1:4]:
                     await target_channel.send(content=attachment.url)
 
             await interaction.followup.send("✅ **تم إصدار التعميم بنجاح مع الصور!**", ephemeral=True)
-            try: await msg.delete() # يمسح رسالة الصور حق الموظف عشان الترتيب
+            try: await msg.delete() # لتنظيف الشات
             except: pass
         except asyncio.TimeoutError:
-            await interaction.followup.send("❌ **انتهى الوقت ولم تقم بإرسال الصور. أعد المحاولة.**", ephemeral=True)
+            await interaction.followup.send("❌ **انتهى الوقت ولم تقم بإرسال الصور. أعد المحاولة من جديد.**", ephemeral=True)
 
-
-# أزرار لوحة التحكم
 class BankControlPanel(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -204,8 +223,6 @@ class BankControlPanel(discord.ui.View):
     async def issue_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(IssuePenaltyModal())
 
-
-# الأمر الجديد لاستدعاء اللوحة
 @bot.tree.command(name="إستدعاء_تحرير_المخالفات", description="إرسال لوحة التحكم الخاصة بالبنك المركزي")
 async def summon_bank_panel(interaction: discord.Interaction):
     if interaction.channel.id != 1526668039620395151:
@@ -221,5 +238,17 @@ async def summon_bank_panel(interaction: discord.Interaction):
     await interaction.channel.send(embed=embed, view=BankControlPanel())
     await interaction.response.send_message("✅ **تم استدعاء اللوحة بنجاح.**", ephemeral=True)
 
-# ضع التوكن الخاص بك هنا
-# bot.run("YOUR_BOT_TOKEN")
+# ==========================================
+# 🚀 تشغيل البوت
+# ==========================================
+if __name__ == "__main__":
+    keep_alive() # تشغيل السيرفر لضمان بقاء البوت
+    
+    # Render يجب أن يحتوي على المتغير DISCORD_TOKEN
+    token = os.environ.get("DISCORD_TOKEN")
+    
+    if token:
+        bot.run(token)
+    else:
+        print("❌ تحذير: لم يتم العثور على التوكن! تأكد من إضافته في Environment Variables.")
+        # bot.run("ضع_توكن_البوت_هنا_إذا_أردت_التجربة_في_جهازك")
