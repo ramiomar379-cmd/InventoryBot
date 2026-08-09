@@ -1,12 +1,9 @@
 import discord
 from discord import app_commands
-from discord.ext import commands, tasks
+from discord.ext import commands
 import os
-import datetime
 import asyncio
-import requests
-import json
-import random
+import io
 from flask import Flask
 from threading import Thread
 
@@ -40,6 +37,8 @@ class MyBot(commands.Bot):
         )
 
     async def setup_hook(self):
+        # تسجيل لوحة البنك لضمان عمل الأزرار حتى لو طفا البوت واشتغل
+        self.add_view(BankControlPanel())
         # مزامنة أوامر السلاش عند تشغيل البوت
         await self.tree.sync()
         print("✅ تم تشغيل البوت ومزامنة الأوامر بنجاح، أهلاً بك يا عمر!")
@@ -54,20 +53,17 @@ SQUADS_DATA = {
 }
 
 # ==========================================
-# 1. أمر مسح الرسائل (!مسح)
+# 1. أمر مسح الرسائل (تم تحويله إلى Slash Command)
 # ==========================================
-@bot.command(name="مسح", aliases=["clear"])
-@commands.has_permissions(manage_messages=True)
-async def clear_messages(ctx, amount: int = 10):
+@bot.tree.command(name="مسح", description="مسح عدد معين من الرسائل في الروم الحالي")
+@app_commands.default_permissions(manage_messages=True)
+async def clear_messages(interaction: discord.Interaction, amount: int = 10):
+    await interaction.response.defer(ephemeral=True)
     try:
-        deleted = await ctx.channel.purge(limit=amount + 1)
-        confirm_msg = await ctx.send(f"✅ **تم مسح {len(deleted)-1} رسالة بنجاح بواسطة {ctx.author.mention}.**")
-        await asyncio.sleep(3)
-        await confirm_msg.delete()
+        deleted = await interaction.channel.purge(limit=amount)
+        await interaction.followup.send(f"✅ **تم مسح {len(deleted)} رسالة بنجاح.**", ephemeral=True)
     except Exception as e:
-        msg = await ctx.send("❌ **حدث خطأ، تأكد من إعطاء البوت صلاحية Manage Messages!**")
-        await asyncio.sleep(3)
-        await msg.delete()
+        await interaction.followup.send("❌ **حدث خطأ، تأكد من إعطاء البوت صلاحية Manage Messages!**", ephemeral=True)
 
 # ==========================================
 # 2. نظام التقديمات (القبول والرفض مع الأسباب)
@@ -150,7 +146,6 @@ class RemovePenaltyModal(discord.ui.Modal, title='إزالة مخالفة ورف
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        # تأكد من أن هذا هو آيدي روم التعميمات الصحيح
         channel = interaction.guild.get_channel(1536074561567727656) 
         if not channel:
             return await interaction.followup.send("❌ **لم أتمكن من إيجاد روم التعميمات!**", ephemeral=True)
@@ -169,6 +164,7 @@ class RemovePenaltyModal(discord.ui.Modal, title='إزالة مخالفة ورف
         except Exception as e:
             await interaction.followup.send("❌ **لم أتمكن من العثور على الرسالة، تأكد من نسخ الآيدي بشكل صحيح.**", ephemeral=True)
 
+
 class IssuePenaltyModal(discord.ui.Modal, title='تحرير مخالفة عدم سداد'):
     name = discord.ui.TextInput(label='الإسم ( إن وجد )', required=False)
     player_id = discord.ui.TextInput(label='الإيدي (رقم الهوية)', required=True)
@@ -177,43 +173,67 @@ class IssuePenaltyModal(discord.ui.Modal, title='تحرير مخالفة عدم 
     squad = discord.ui.TextInput(label='الكتيبة الموجه لها', required=True)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.send_message("**✅ تم حفظ البيانات. الرجاء إرسال صور الإثبات (من 2 إلى 4 صور) في رسالة واحدة هنا الآن... معك دقيقتين.**", ephemeral=True)
+        # 1. طلب ملف الـ PDF
+        await interaction.response.send_message("**✅ تم حفظ البيانات. الرجاء إرسال [ملف PDF واحد فقط] هنا الآن... معك دقيقتين.**", ephemeral=True)
         
-        def check(m):
-            return m.author == interaction.user and m.channel == interaction.channel and len(m.attachments) >= 1
+        def check_pdf(m):
+            # نتحقق إن المرسل هو نفس الشخص، وإن الرسالة تحتوي على مرفق واحد، وامتداده pdf
+            return m.author == interaction.user and m.channel == interaction.channel and len(m.attachments) == 1 and m.attachments[0].filename.lower().endswith('.pdf')
             
         try:
-            msg = await bot.wait_for('message', timeout=120.0, check=check)
-            target_channel = interaction.guild.get_channel(1536074561567727656)
+            # انتظار رسالة الـ PDF
+            pdf_msg = await bot.wait_for('message', timeout=120.0, check=check_pdf)
+            pdf_attachment = pdf_msg.attachments[0]
             
-            embed = discord.Embed(
-                title="🚨 | تعميم رسمي من البنك المركزي - وزارة العدل",
-                description="**تم إصدار مذكرة ملاحقة مالية بحق المذكور أدناه لعدم سداد المستحقات المالية.**",
-                color=discord.Color.red()
-            )
-            embed.add_field(name="👤 الإسم", value=f"**{self.name.value or 'غير معروف'}**", inline=True)
-            embed.add_field(name="💳 الإيدي", value=f"**{self.player_id.value}**", inline=True)
-            embed.add_field(name="💰 المبلغ", value=f"**{self.amount.value}**", inline=False)
-            embed.add_field(name="⚠️ الخطورة", value=f"**{self.danger.value}**", inline=True)
-            embed.add_field(name="🚓 الكتيبة الموجهة", value=f"**{self.squad.value}**", inline=True)
-            embed.set_footer(text=f"تم الإصدار بواسطة: {interaction.user.display_name}")
-
-            # الصورة الأولى كصورة رئيسية للإمبد
-            if msg.attachments:
-                embed.set_image(url=msg.attachments[0].url)
-
-            await target_channel.send(content="@here **🚨 تعميم مالي جديد!**", embed=embed)
+            # 2. طلب كلمة المرور للملف
+            await interaction.followup.send("**✅ ممتاز، تم استلام ملف الـ PDF. الرجاء كتابة [كلمة المرور] الخاصة بالملف الآن كرسالة... معك دقيقة واحدة.**", ephemeral=True)
             
-            # باقي الصور كرسائل ملحقة
-            if len(msg.attachments) > 1:
-                for attachment in msg.attachments[1:4]:
-                    await target_channel.send(content=attachment.url)
+            def check_password(m):
+                # نتحقق إن المستخدم أرسل رسالة نصية (كلمة المرور)
+                return m.author == interaction.user and m.channel == interaction.channel and m.content.strip() != ""
+                
+            try:
+                # انتظار رسالة كلمة المرور
+                pass_msg = await bot.wait_for('message', timeout=60.0, check=check_password)
+                password = pass_msg.content.strip()
+                
+                target_channel = interaction.guild.get_channel(1536074561567727656)
+                
+                embed = discord.Embed(
+                    title="🚨 | تعميم رسمي من البنك المركزي - وزارة العدل",
+                    description="**تم إصدار مذكرة ملاحقة مالية بحق المذكور أدناه لعدم سداد المستحقات المالية.**",
+                    color=discord.Color.red()
+                )
+                embed.add_field(name="👤 الإسم", value=f"**{self.name.value or 'غير معروف'}**", inline=True)
+                embed.add_field(name="💳 الإيدي", value=f"**{self.player_id.value}**", inline=True)
+                embed.add_field(name="💰 المبلغ", value=f"**{self.amount.value}**", inline=False)
+                embed.add_field(name="⚠️ الخطورة", value=f"**{self.danger.value}**", inline=True)
+                embed.add_field(name="🚓 الكتيبة الموجهة", value=f"**{self.squad.value}**", inline=True)
+                embed.add_field(name="🔒 كلمة مرور الملف", value=f"**{password}**", inline=False)
+                embed.set_footer(text=f"تم الإصدار بواسطة: {interaction.user.display_name}")
 
-            await interaction.followup.send("✅ **تم إصدار التعميم بنجاح مع الصور!**", ephemeral=True)
-            try: await msg.delete() # لتنظيف الشات
-            except: pass
+                # قراءة الملف من الديسكورد وتحويله لملف يمكن إعادة إرساله (عشان ما يعطل لو حذفنا الرسالة الأصلية)
+                file_bytes = await pdf_attachment.read()
+                uploaded_pdf = discord.File(fp=io.BytesIO(file_bytes), filename=pdf_attachment.filename)
+
+                # إرسال التعميم مع الملف المرفق
+                await target_channel.send(content="@here **🚨 تعميم مالي جديد!**", embed=embed, file=uploaded_pdf)
+                
+                await interaction.followup.send("✅ **تم إصدار التعميم وإرفاق ملف الـ PDF بنجاح!**", ephemeral=True)
+                
+                # تنظيف الشات بمسح رسالة الـ PDF ورسالة كلمة المرور اللي أرسلها الإداري
+                try: 
+                    await pdf_msg.delete()
+                    await pass_msg.delete()
+                except: 
+                    pass
+
+            except asyncio.TimeoutError:
+                await interaction.followup.send("❌ **انتهى الوقت ولم تقم بكتابة كلمة المرور. أعد المحاولة من جديد.**", ephemeral=True)
+
         except asyncio.TimeoutError:
-            await interaction.followup.send("❌ **انتهى الوقت ولم تقم بإرسال الصور. أعد المحاولة من جديد.**", ephemeral=True)
+            await interaction.followup.send("❌ **انتهى الوقت أو أنك لم تقم بإرسال ملف بصيغة PDF. أعد المحاولة من جديد.**", ephemeral=True)
+
 
 class BankControlPanel(discord.ui.View):
     def __init__(self):
@@ -245,4 +265,5 @@ async def summon_bank_panel(interaction: discord.Interaction):
 # ==========================================
 # 🚀 تشغيل السيرفر والبوت
 # ==========================================
+keep_alive() 
 bot.run(os.getenv('TOKEN'))
