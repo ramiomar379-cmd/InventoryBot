@@ -1,8 +1,12 @@
 import discord
 from discord import app_commands
-from discord.ext import commands
-import asyncio
+from discord.ext import commands, tasks
 import os
+import datetime
+import asyncio
+import requests
+import json
+import random
 from flask import Flask
 from threading import Thread
 
@@ -239,16 +243,6 @@ async def summon_bank_panel(interaction: discord.Interaction):
     await interaction.response.send_message("✅ **تم استدعاء اللوحة بنجاح.**", ephemeral=True)
 
 # ==========================================
-# 🚀 تشغيل البوت
+# 🚀 تشغيل السيرفر والبوت
 # ==========================================
-if __name__ == "__main__":
-    keep_alive() # تشغيل السيرفر لضمان بقاء البوت
-    
-    # Render يجب أن يحتوي على المتغير DISCORD_TOKEN
-    token = os.environ.get("DISCORD_TOKEN")
-    
-    if token:
-        bot.run(token)
-    else:
-        print("❌ تحذير: لم يتم العثور على التوكن! تأكد من إضافته في Environment Variables.")
-        # bot.run("ضع_توكن_البوت_هنا_إذا_أردت_التجربة_في_جهازك")
+bot.run(os.getenv('TOKEN'))
