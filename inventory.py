@@ -7,8 +7,14 @@ import asyncio
 import requests
 import json
 import random
+import io
+import logging
+from pathlib import Path
 from flask import Flask
 from threading import Thread
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("justice_discord_bot")
 
 # ==========================================
 # 1. إعداد خادم الويب (للعمل على Render)
@@ -27,7 +33,12 @@ Thread(target=run_server, daemon=True).start()
 # ==========================================
 # 2. إعداد البوت والنوايا (Intents)
 # ==========================================
-intents = discord.Intents.all()
+intents = discord.Intents.none()
+intents.guilds = True
+intents.members = True
+intents.messages = True
+intents.message_content = True
+intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ==========================================
@@ -108,6 +119,7 @@ DIVIDER_GIF_URL = "https://media.discordapp.net/attachments/1522904957391474759/
 ACCEPT_FINAL_IMG = "https://media.discordapp.net/attachments/1526668577971765449/1535776350089252935/4.png"
 ACCEPT_INITIAL_IMG = "https://media.discordapp.net/attachments/1526668577971765449/1535775643822727198/3.png"
 MENU_IMAGE_URL = "https://media.discordapp.net/attachments/1526668577971765449/1536100000000000000/image_3ee0b6.png"
+MAX_PDF_BYTES = 8 * 1024 * 1024
 
 active_sessions = {}
 offline_timers = {}
@@ -117,25 +129,165 @@ channel_previous_permissions = {}
 # ==========================================
 # 5. دوال حفظ البيانات
 # ==========================================
-DATA_FILE = "bot_data.json"
+DATA_FILE = Path(__file__).with_name("bot_data.json")
+
+
+def default_bot_data():
+    return {
+        "weekly_audit": 1,
+        "monthly_audit": 1,
+        "time_adjustments": {},
+        "squad_points_adjustments": {"unit": 0, "eco": 0, "air": 0},
+        "active_sessions": {},
+        "attendance_history": [],
+        "channel_previous_permissions": {},
+    }
+
+
 def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as f:
-            return json.load(f)
-    return {"weekly_audit": 1, "monthly_audit": 1, "time_adjustments": {}, "squad_points_adjustments": {"unit": 0, "eco": 0, "air": 0}}
+    data = default_bot_data()
+    if not DATA_FILE.exists():
+        return data
+
+    try:
+        with DATA_FILE.open("r", encoding="utf-8") as file:
+            loaded = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Could not load %s; starting with safe defaults.", DATA_FILE)
+        return data
+
+    if not isinstance(loaded, dict):
+        logger.warning("Ignoring invalid data in %s.", DATA_FILE)
+        return data
+
+    for counter in ("weekly_audit", "monthly_audit"):
+        if isinstance(loaded.get(counter), int) and loaded[counter] >= 1:
+            data[counter] = loaded[counter]
+
+    if isinstance(loaded.get("time_adjustments"), dict):
+        migrated_adjustments = {}
+        migration_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        for user_id, raw_adjustments in loaded["time_adjustments"].items():
+            if isinstance(raw_adjustments, (int, float)):
+                # Compatibility with the old format; retain it for the next weekly audit only.
+                migrated_adjustments[str(user_id)] = [{"seconds": raw_adjustments, "created_at": migration_time}]
+            elif isinstance(raw_adjustments, list):
+                migrated_adjustments[str(user_id)] = [
+                    adjustment
+                    for adjustment in raw_adjustments
+                    if (
+                        isinstance(adjustment, dict)
+                        and isinstance(adjustment.get("seconds"), (int, float))
+                        and isinstance(adjustment.get("created_at"), str)
+                    )
+                ]
+        data["time_adjustments"] = migrated_adjustments
+
+    if isinstance(loaded.get("squad_points_adjustments"), dict):
+        for squad in data["squad_points_adjustments"]:
+            points = loaded["squad_points_adjustments"].get(squad)
+            if isinstance(points, (int, float)):
+                data["squad_points_adjustments"][squad] = points
+
+    if isinstance(loaded.get("active_sessions"), dict):
+        data["active_sessions"] = loaded["active_sessions"]
+    if isinstance(loaded.get("attendance_history"), list):
+        data["attendance_history"] = loaded["attendance_history"]
+    if isinstance(loaded.get("channel_previous_permissions"), dict):
+        data["channel_previous_permissions"] = loaded["channel_previous_permissions"]
+    return data
 
 def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f)
+    data["active_sessions"] = {
+        str(user_id): login_time.isoformat()
+        for user_id, login_time in active_sessions.items()
+    }
+    data["attendance_history"] = [
+        {
+            "user_id": record["user_id"],
+            "login": record["login"].isoformat(),
+            "logout": record["logout"].isoformat(),
+        }
+        for record in attendance_history
+    ]
+    data["channel_previous_permissions"] = channel_previous_permissions
+
+    temporary_file = DATA_FILE.with_suffix(".tmp")
+    try:
+        with temporary_file.open("w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2)
+        temporary_file.replace(DATA_FILE)
+    except OSError:
+        logger.exception("Could not save %s.", DATA_FILE)
 
 bot_data = load_data()
+
+
+def parse_timestamp(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        timestamp = datetime.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=datetime.timezone.utc)
+    return timestamp.astimezone(datetime.timezone.utc)
+
+
+for stored_user_id, stored_login_time in bot_data["active_sessions"].items():
+    try:
+        user_id = int(stored_user_id)
+    except (TypeError, ValueError):
+        continue
+    login_time = parse_timestamp(stored_login_time)
+    if login_time:
+        active_sessions[user_id] = login_time
+
+for stored_record in bot_data["attendance_history"]:
+    if not isinstance(stored_record, dict):
+        continue
+    try:
+        user_id = int(stored_record["user_id"])
+    except (KeyError, TypeError, ValueError):
+        continue
+    login_time = parse_timestamp(stored_record.get("login"))
+    logout_time = parse_timestamp(stored_record.get("logout"))
+    if login_time and logout_time and logout_time >= login_time:
+        attendance_history.append({"user_id": user_id, "login": login_time, "logout": logout_time})
+
+channel_previous_permissions = bot_data["channel_previous_permissions"]
+views_registered = False
+commands_synced = False
 
 # ==========================================
 # 6. دوال مساعدة عامة
 # ==========================================
 def has_squad_audit_permission(interaction: discord.Interaction) -> bool:
+    if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+        return False
     if interaction.user.guild_permissions.administrator: return True
     return any(role_id in [role.id for role in interaction.user.roles] for role_id in SQUAD_AUDIT_ROLES)
+
+
+def is_administrator(interaction: discord.Interaction) -> bool:
+    return (
+        interaction.guild is not None
+        and isinstance(interaction.user, discord.Member)
+        and interaction.user.guild_permissions.administrator
+    )
+
+
+async def require_administrator(interaction: discord.Interaction) -> bool:
+    if is_administrator(interaction):
+        return True
+
+    message = "❌ هذه العملية متاحة فقط لمن يمتلك صلاحية Administrator."
+    if interaction.response.is_done():
+        await interaction.followup.send(message, ephemeral=True)
+    else:
+        await interaction.response.send_message(message, ephemeral=True)
+    return False
 
 def get_leaders_signatures(guild: discord.Guild) -> str:
     role = guild.get_role(1535725186957971458)
@@ -146,13 +298,55 @@ def get_leaders_signatures(guild: discord.Guild) -> str:
     if len(members) >= 2: sig_text += f"الرتبة الثانية نائب مسؤول الكتائب\n{members[1].mention}\n"
     return sig_text
 
+
+async def assign_winner_role(guild: discord.Guild, role_id: int, leader_ids: list[int]):
+    """Keep a winner role exclusive to the leaders of the current winner."""
+    winner_role = guild.get_role(role_id)
+    if winner_role is None:
+        logger.warning("Winner role %s was not found in guild %s.", role_id, guild.id)
+        return
+
+    for member in list(winner_role.members):
+        if member.id not in leader_ids:
+            try:
+                await member.remove_roles(winner_role, reason="Winner role reassigned")
+            except discord.DiscordException:
+                logger.exception("Could not remove winner role from member %s.", member.id)
+
+    for leader_id in leader_ids:
+        member = guild.get_member(leader_id)
+        if member and winner_role not in member.roles:
+            try:
+                await member.add_roles(winner_role, reason="Current audit winner")
+            except discord.DiscordException:
+                logger.exception("Could not grant winner role to member %s.", leader_id)
+
+
+def reset_squad_point_adjustments():
+    bot_data["squad_points_adjustments"] = {squad: 0 for squad in SQUADS_DATA}
+
+
+def valid_duration(hours: int, minutes: int, seconds: int) -> bool:
+    return hours >= 0 and 0 <= minutes < 60 and 0 <= seconds < 60 and (hours + minutes + seconds) > 0
+
+
+def record_time_adjustment(user_id: int, seconds: int):
+    adjustments = bot_data["time_adjustments"].setdefault(str(user_id), [])
+    adjustments.append(
+        {
+            "seconds": seconds,
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+    )
+
 async def send_custom_log(title: str, description: str, color=discord.Color.blue(), channel_id=GENERAL_CUSTOM_LOG_ID):
     try:
         log_channel = bot.get_channel(channel_id)
         if log_channel:
             embed = discord.Embed(title=title, description=description, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
             await log_channel.send(embed=embed)
-    except: pass
+    except discord.DiscordException:
+        logger.exception("Could not send log message to channel %s.", channel_id)
 
 async def sync_user_data(main_member: discord.Member, sec_member: discord.Member):
     changes = []
@@ -161,7 +355,8 @@ async def sync_user_data(main_member: discord.Member, sec_member: discord.Member
         if sec_member.display_name != target_nick:
             await sec_member.edit(nick=target_nick)
             changes.append(f"تغيير اللقب إلى: `{target_nick}`")
-    except: pass
+    except discord.DiscordException:
+        logger.exception("Could not sync nickname for member %s.", sec_member.id)
     try:
         main_role_ids = [r.id for r in main_member.roles]
         roles_to_add, roles_to_remove = [], []
@@ -181,7 +376,8 @@ async def sync_user_data(main_member: discord.Member, sec_member: discord.Member
         
         if changes:
             await send_custom_log("🔄 لوق مزامنة عضو", f"العضو: {sec_member.mention}\nالتغييرات:\n- " + "\n- ".join(changes), channel_id=LOG_SYNC_CHANNEL_ID)
-    except: pass
+    except discord.DiscordException:
+        logger.exception("Could not sync roles for member %s.", sec_member.id)
 
 # ==========================================
 # 7. الأحداث والمهام
@@ -204,8 +400,10 @@ async def on_member_join(member: discord.Member):
 
 @tasks.loop(minutes=1)
 async def keep_alive_task():
-    try: requests.get("https://al3dl-bot-test.onrender.com", timeout=5)
-    except: pass
+    try:
+        await asyncio.to_thread(requests.get, "https://al3dl-bot-test.onrender.com", timeout=5)
+    except requests.RequestException:
+        logger.warning("Keep-alive request failed.")
 
 @tasks.loop(seconds=30)
 async def check_offline_status():
@@ -220,11 +418,16 @@ async def check_offline_status():
                 offline_timers[user_id] = now
             else:
                 if (now - offline_timers[user_id]).total_seconds() >= 600:
-                    del active_sessions[user_id]
-                    del offline_timers[user_id]
+                    active_sessions.pop(user_id, None)
+                    offline_timers.pop(user_id, None)
                     attendance_history.append({"user_id": user_id, "login": login_time, "logout": now})
-                    try: await member.send("**⚠️ تم تسجيل خروجك تلقائياً لمرور 10 دقائق أوفلاين.**")
-                    except: pass
+                    save_data(bot_data)
+                    try:
+                        await member.send("**⚠️ تم تسجيل خروجك تلقائياً لمرور 10 دقائق أوفلاين.**")
+                    except discord.Forbidden:
+                        pass
+        else:
+            offline_timers.pop(user_id, None)
 
 @check_offline_status.before_loop
 async def before_check():
@@ -232,15 +435,29 @@ async def before_check():
 
 @bot.event
 async def on_ready():
-    bot.add_view(ApplicationMenuView()) 
-    await bot.tree.sync()
-    keep_alive_task.start()
-    check_offline_status.start()
+    global views_registered, commands_synced
+    if not views_registered:
+        bot.add_view(ApplicationMenuView())
+        bot.add_view(BankControlPanel())
+        views_registered = True
+
+    if not commands_synced:
+        try:
+            await bot.tree.sync()
+            commands_synced = True
+        except discord.HTTPException:
+            logger.exception("Could not sync application commands.")
+
+    if not keep_alive_task.is_running():
+        keep_alive_task.start()
+    if not check_offline_status.is_running():
+        check_offline_status.start()
     print(f"✅ تم تشغيل البوت بنجاح: {bot.user}")
 
 @bot.event
 async def on_message(message: discord.Message):
-    if message.author.bot: return
+    if message.author.bot or message.guild is None:
+        return
     
     if message.content.startswith('!') or message.content.startswith('$'):
         if message.content.startswith('!id'):
@@ -257,40 +474,75 @@ async def on_message(message: discord.Message):
         await message.delete()
         guild, channel = message.guild, message.channel
         default_role = guild.default_role
-        allowed_roles_list = []
-        overwrite_dict = channel.overwrites
-        ov = channel.overwrites_for(default_role)
-        ov.send_messages = False
-        await channel.set_permissions(default_role, overwrite=ov)
-        for target, overwrite in overwrite_dict.items():
-            if isinstance(target, discord.Role) and target.id != default_role.id:
-                if overwrite.send_messages is True or (overwrite.send_messages is None and target.permissions.send_messages):
-                    allowed_roles_list.append(target)
-                    new_ov = channel.overwrites_for(target)
-                    new_ov.send_messages = False
-                    await channel.set_permissions(target, overwrite=new_ov)
-        channel_previous_permissions[channel.id] = allowed_roles_list
-        roles_str = " ".join([r.mention for r in allowed_roles_list]) if allowed_roles_list else "لا توجد"
-        await channel.send(f"**🔒 تم إغلاق الروم:\n\nالرتب التي تم إغلاق الروم عليها:\n{roles_str}**")
+        previous_permissions = {}
+
+        def remember_permission(target, target_type):
+            key = f"{target_type}:{target.id}"
+            previous_permissions[key] = {
+                "type": target_type,
+                "id": target.id,
+                "send_messages": channel.overwrites_for(target).send_messages,
+            }
+
+        remember_permission(default_role, "role")
+        for target in channel.overwrites:
+            if target.id == default_role.id:
+                continue
+            if isinstance(target, discord.Role):
+                remember_permission(target, "role")
+            elif isinstance(target, discord.Member):
+                remember_permission(target, "member")
+
+        # Keep an exact, persistent snapshot so a restart cannot leave the channel locked.
+        channel_previous_permissions[str(channel.id)] = previous_permissions
+        save_data(bot_data)
+
+        for permission_state in previous_permissions.values():
+            target = (
+                guild.get_role(permission_state["id"])
+                if permission_state["type"] == "role"
+                else guild.get_member(permission_state["id"])
+            )
+            if target is not None:
+                overwrite = channel.overwrites_for(target)
+                overwrite.send_messages = False
+                await channel.set_permissions(target, overwrite=overwrite)
+
+        await channel.send("**🔒 تم إغلاق الروم وحفظ صلاحياته السابقة لاستعادتها لاحقاً.**")
 
     if message.content.strip() == "$أفتح_عليهم_الروم_يامدير":
         if not message.author.guild_permissions.administrator: return
         await message.delete()
-        channel = message.channel
-        ov = channel.overwrites_for(message.guild.default_role)
-        ov.send_messages = None
-        await channel.set_permissions(message.guild.default_role, overwrite=ov)
-        for role in channel_previous_permissions.get(channel.id, []):
-            ov2 = channel.overwrites_for(role)
-            ov2.send_messages = True
-            await channel.set_permissions(role, overwrite=ov2)
+        guild, channel = message.guild, message.channel
+        previous_permissions = channel_previous_permissions.pop(str(channel.id), None)
+        if not isinstance(previous_permissions, dict):
+            return await channel.send("**❌ لا توجد صلاحيات محفوظة لهذا الروم، لذلك لم أغيّر أي صلاحية.**")
+
+        for permission_state in previous_permissions.values():
+            target = (
+                guild.get_role(permission_state.get("id"))
+                if permission_state.get("type") == "role"
+                else guild.get_member(permission_state.get("id"))
+            )
+            if target is None:
+                continue
+            overwrite = channel.overwrites_for(target)
+            previous_value = permission_state.get("send_messages")
+            overwrite.send_messages = previous_value if previous_value in (True, False, None) else None
+            await channel.set_permissions(target, overwrite=overwrite)
+
+        save_data(bot_data)
         await channel.send("**🔓 تم فتح الروم ورجعت الصلاحيات.**")
 
     if message.channel.id == ATTENDANCE_CHANNEL_ID:
         now = datetime.datetime.now(datetime.timezone.utc)
         if message.content.strip() == '-د':
+            if message.author.id in active_sessions:
+                await message.delete()
+                return await message.channel.send(f"{message.author.mention} لديك تسجيل حضور مفتوح بالفعل.")
             active_sessions[message.author.id] = now
-            if message.author.id in offline_timers: del offline_timers[message.author.id]
+            offline_timers.pop(message.author.id, None)
+            save_data(bot_data)
             embed = discord.Embed(title="تسجيل", description=f"المحامي : {message.author.mention}\n\nسجل دخول\n\nحياك الله", color=0x00ff00)
             embed.set_thumbnail(url=message.author.avatar.url if message.author.avatar else message.author.default_avatar.url)
             embed.set_image(url=IMAGE_URL) 
@@ -302,8 +554,9 @@ async def on_message(message: discord.Message):
         elif message.content.strip() == '-خ':
             if message.author.id in active_sessions:
                 login_time = active_sessions.pop(message.author.id)
-                if message.author.id in offline_timers: del offline_timers[message.author.id]
+                offline_timers.pop(message.author.id, None)
                 attendance_history.append({"user_id": message.author.id, "login": login_time, "logout": now})
+                save_data(bot_data)
                 embed = discord.Embed(title="تسجيل", description=f"المحامي : {message.author.mention}\n\nسجل خروج\n\nموفق خير", color=0xff0000)
                 embed.set_thumbnail(url=message.author.avatar.url if message.author.avatar else message.author.default_avatar.url)
                 embed.set_image(url=IMAGE_URL)
@@ -361,13 +614,7 @@ async def weekly_squad_audit(interaction: discord.Interaction):
     winner_info = SQUADS_DATA[winner_key]
     winner_points = squad_scores[winner_key]
     
-    winner_role_obj = interaction.guild.get_role(WEEKLY_WINNER_ROLE_ID)
-    if winner_role_obj:
-        for lead_id in winner_info["leaders"]:
-            leader_member = interaction.guild.get_member(lead_id)
-            if leader_member:
-                try: await leader_member.add_roles(winner_role_obj)
-                except: pass
+    await assign_winner_role(interaction.guild, WEEKLY_WINNER_ROLE_ID, winner_info["leaders"])
                 
     leaders_mentions = " و ".join([f"معالي <@{lid}>" for lid in winner_info["leaders"]])
     current_date = datetime.datetime.now().strftime("%Y/%m/%d")
@@ -391,6 +638,7 @@ async def weekly_squad_audit(interaction: discord.Interaction):
     )
     await target_channel.send(content=final_msg)
     bot_data["weekly_audit"] += 1
+    reset_squad_point_adjustments()
     save_data(bot_data)
 
 @bot.tree.command(name="جرد_الكتائب_الشهري", description="إجراء جرد الكتائب الشهري")
@@ -431,13 +679,7 @@ async def monthly_squad_audit(interaction: discord.Interaction):
     winner_info = SQUADS_DATA[winner_key]
     winner_points = squad_scores[winner_key]
     
-    winner_role_obj = interaction.guild.get_role(MONTHLY_WINNER_ROLE_ID)
-    if winner_role_obj:
-        for lead_id in winner_info["leaders"]:
-            leader_member = interaction.guild.get_member(lead_id)
-            if leader_member:
-                try: await leader_member.add_roles(winner_role_obj)
-                except: pass
+    await assign_winner_role(interaction.guild, MONTHLY_WINNER_ROLE_ID, winner_info["leaders"])
                 
     leaders_mentions = " و ".join([f"معالي <@{lid}>" for lid in winner_info["leaders"]])
     current_date = datetime.datetime.now().strftime("%Y/%m/%d")
@@ -459,6 +701,7 @@ async def monthly_squad_audit(interaction: discord.Interaction):
     )
     await target_channel.send(content=final_msg)
     bot_data["monthly_audit"] += 1
+    reset_squad_point_adjustments()
     save_data(bot_data)
 
 # ==========================================
@@ -497,8 +740,10 @@ class AdminApplicationReviewView(discord.ui.View):
         for r_id in roles_to_give:
             r = interaction.guild.get_role(r_id)
             if r: 
-                try: await self.applicant.add_roles(r)
-                except: pass
+                try:
+                    await self.applicant.add_roles(r)
+                except discord.DiscordException:
+                    logger.exception("Could not grant application role %s to member %s.", r_id, self.applicant.id)
                 
         for child in self.children: child.disabled = True
         await interaction.message.edit(view=self)
@@ -535,10 +780,14 @@ class ApplicationModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        try: age_val = int(self.age.value)
-        except: age_val = 0
-        try: hours_val = int(self.hours.value)
-        except: hours_val = 0
+        try:
+            age_val = int(self.age.value)
+        except ValueError:
+            age_val = 0
+        try:
+            hours_val = int(self.hours.value)
+        except ValueError:
+            hours_val = 0
         
         if self.exp.value.strip() == "كلشيء":
             return await interaction.followup.send("❌ يُمنع كتابة 'كلشيء' في خانة الخبرات. تم رفض التقديم.", ephemeral=True)
@@ -553,8 +802,10 @@ class ApplicationModal(discord.ui.Modal):
             view = AdminApplicationReviewView(applicant=interaction.user, unit=self.unit_key)
             await admin_channel.send(content="||@here|| تقديم جديد يحتاج مراجعتكم:", embed=embed, view=view)
             
-            try: await interaction.user.send(f"مُبارك قبولك المبدئي في {{ {self.unit_name} }}\n{ACCEPT_INITIAL_IMG}")
-            except: pass
+            try:
+                await interaction.user.send(f"مُبارك قبولك المبدئي في {{ {self.unit_name} }}\n{ACCEPT_INITIAL_IMG}")
+            except discord.Forbidden:
+                pass
 
         await interaction.followup.send("✅ تم إرسال تقديمك بنجاح. سيتم مراجعته من الإدارة.", ephemeral=True)
 
@@ -595,9 +846,11 @@ async def add_hours(interaction: discord.Interaction, user: discord.Member, hour
     await interaction.response.defer(ephemeral=False)
     if ADMIN_ROLE_ID not in [r.id for r in interaction.user.roles] and not interaction.user.guild_permissions.administrator:
         return await interaction.followup.send("❌ ليس لديك صلاحية.", ephemeral=True)
+    if not valid_duration(hours, minutes, seconds):
+        return await interaction.followup.send("❌ أدخل مدة موجبة، مع دقائق وثوانٍ بين 0 و59.", ephemeral=True)
     
     total_seconds = (hours * 3600) + (minutes * 60) + seconds
-    bot_data["time_adjustments"][str(user.id)] = bot_data["time_adjustments"].get(str(user.id), 0) + total_seconds
+    record_time_adjustment(user.id, total_seconds)
     save_data(bot_data)
     await interaction.followup.send(f"✅ تم إضافة `{hours}س و {minutes}د و {seconds}ث` لـ {user.mention}.")
 
@@ -607,9 +860,11 @@ async def sub_hours(interaction: discord.Interaction, user: discord.Member, hour
     await interaction.response.defer(ephemeral=False)
     if ADMIN_ROLE_ID not in [r.id for r in interaction.user.roles] and not interaction.user.guild_permissions.administrator:
         return await interaction.followup.send("❌ ليس لديك صلاحية.", ephemeral=True)
+    if not valid_duration(hours, minutes, seconds):
+        return await interaction.followup.send("❌ أدخل مدة موجبة، مع دقائق وثوانٍ بين 0 و59.", ephemeral=True)
     
     total_seconds = (hours * 3600) + (minutes * 60) + seconds
-    bot_data["time_adjustments"][str(user.id)] = bot_data["time_adjustments"].get(str(user.id), 0) - total_seconds
+    record_time_adjustment(user.id, -total_seconds)
     save_data(bot_data)
     await interaction.followup.send(f"✅ تم خصم `{hours}س و {minutes}د و {seconds}ث` من {user.mention}.")
 
@@ -622,6 +877,8 @@ async def sub_hours(interaction: discord.Interaction, user: discord.Member, hour
 async def add_points(interaction: discord.Interaction, squad: app_commands.Choice[str], points: int):
     await interaction.response.defer(ephemeral=False)
     if not has_squad_audit_permission(interaction): return await interaction.followup.send("❌ ليس لديك صلاحية.", ephemeral=True)
+    if points <= 0:
+        return await interaction.followup.send("❌ يجب أن تكون النقاط أكبر من صفر.", ephemeral=True)
     
     bot_data["squad_points_adjustments"][squad.value] += points
     save_data(bot_data)
@@ -636,6 +893,8 @@ async def add_points(interaction: discord.Interaction, squad: app_commands.Choic
 async def sub_points(interaction: discord.Interaction, squad: app_commands.Choice[str], points: int):
     await interaction.response.defer(ephemeral=False)
     if not has_squad_audit_permission(interaction): return await interaction.followup.send("❌ ليس لديك صلاحية.", ephemeral=True)
+    if points <= 0:
+        return await interaction.followup.send("❌ يجب أن تكون النقاط أكبر من صفر.", ephemeral=True)
     
     bot_data["squad_points_adjustments"][squad.value] -= points
     save_data(bot_data)
@@ -651,38 +910,81 @@ async def attendance_weekly_audit(interaction: discord.Interaction):
     now = datetime.datetime.now(datetime.timezone.utc)
     last_week = now - datetime.timedelta(days=7)
     users_stats = {}
+
     for record in attendance_history:
         if record["logout"] >= last_week:
             uid = record["user_id"]
-            users_stats[uid] = users_stats.get(uid, 0) + (record["logout"] - record["login"]).total_seconds()
-            
-    for uid_str, adj in bot_data["time_adjustments"].items():
-        uid = int(uid_str)
-        if uid in users_stats: users_stats[uid] += adj
-        else: users_stats[uid] = adj
-            
+            session_start = max(record["login"], last_week)
+            users_stats[uid] = users_stats.get(uid, 0) + (record["logout"] - session_start).total_seconds()
+
+    # Include an open session up to the instant the report is requested.
+    for uid, login_time in active_sessions.items():
+        session_start = max(login_time, last_week)
+        users_stats[uid] = users_stats.get(uid, 0) + (now - session_start).total_seconds()
+
+    active_adjustments = {}
+    for uid_str, adjustments in bot_data["time_adjustments"].items():
+        try:
+            uid = int(uid_str)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(adjustments, list):
+            continue
+        for adjustment in adjustments:
+            if not isinstance(adjustment, dict):
+                continue
+            created_at = parse_timestamp(adjustment.get("created_at"))
+            seconds = adjustment.get("seconds")
+            if created_at is None or not isinstance(seconds, (int, float)) or created_at < last_week:
+                continue
+            active_adjustments.setdefault(str(uid), []).append(adjustment)
+            users_stats[uid] = users_stats.get(uid, 0) + seconds
+    bot_data["time_adjustments"] = active_adjustments
+    save_data(bot_data)
+
     embed = discord.Embed(title="الجرد الأسبوعي للمحامين", color=discord.Color.dark_blue())
     if not users_stats:
         embed.description = "**لا توجد بيانات للأسبوع الماضي.**"
         return await interaction.followup.send(embed=embed)
-        
-    desc = ""
+
+    entries = []
     for uid, seconds in sorted(users_stats.items(), key=lambda x: x[1], reverse=True):
-        if seconds <= 0: continue 
+        if seconds <= 0:
+            continue
         member = interaction.guild.get_member(uid)
         name = member.mention if member else f"ID: {uid}"
-        desc += f"{name}\nإجمالي الوقت: **{round(seconds / 3600, 2)} ساعة**\n\n"
-        
-    embed.description = desc
-    await interaction.followup.send(embed=embed)
+        entries.append(f"{name}\nإجمالي الوقت: **{round(seconds / 3600, 2)} ساعة**\n\n")
+
+    if not entries:
+        embed.description = "**لا توجد ساعات موجبة للأسبوع الماضي.**"
+        return await interaction.followup.send(embed=embed)
+
+    pages, current_page = [], ""
+    for entry in entries:
+        if current_page and len(current_page) + len(entry) > 3800:
+            pages.append(current_page)
+            current_page = ""
+        current_page += entry
+    if current_page:
+        pages.append(current_page)
+
+    for index, page in enumerate(pages, start=1):
+        report_embed = discord.Embed(
+            title=f"الجرد الأسبوعي للمحامين ({index}/{len(pages)})",
+            description=page,
+            color=discord.Color.dark_blue(),
+        )
+        await interaction.followup.send(embed=report_embed)
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     msg = "**❌ حدث خطأ أو ليس لديك الصلاحية لاستخدام الأمر.**"
+    logger.error("Application command failed: %r", error)
     try:
         if not interaction.response.is_done(): await interaction.response.send_message(msg, ephemeral=True)
         else: await interaction.followup.send(msg, ephemeral=True)
-    except: pass
+    except discord.DiscordException:
+        logger.exception("Could not send application-command error response.")
 
     # ==========================================
 # أمر مسح الرسائل (!مسح)
@@ -706,7 +1008,8 @@ async def clear_messages(ctx, amount: int = 10):
             channel_id=GENERAL_CUSTOM_LOG_ID, 
             color=discord.Color.red()
         )
-    except Exception as e:
+    except discord.DiscordException:
+        logger.exception("Could not purge messages in channel %s.", ctx.channel.id)
         await ctx.send("❌ **حدث خطأ أثناء محاولة مسح الرسائل. تأكد من إعطاء البوت صلاحيات Manage Messages!**")
 
 @clear_messages.error
@@ -721,10 +1024,12 @@ async def clear_messages_error(ctx, error):
 # 3. نظام البنك المركزي (لوحة التحكم والتعميمات)
 # ==========================================
 class RemovePenaltyModal(discord.ui.Modal, title='إزالة مخالفة ورفع التعميم'):
-    msg_id = discord.ui.TextInput(label='آيدي رسالة التعميم (Message ID)', style=discord.TextStyle.short)
-    reason = discord.ui.TextInput(label='سبب الإزالة ولماذا؟', style=discord.TextStyle.long)
+    msg_id = discord.ui.TextInput(label='آيدي رسالة التعميم (Message ID)', style=discord.TextStyle.short, max_length=30)
+    reason = discord.ui.TextInput(label='سبب الإزالة ولماذا؟', style=discord.TextStyle.long, max_length=500)
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not await require_administrator(interaction):
+            return
         await interaction.response.defer(ephemeral=True)
         channel = interaction.guild.get_channel(1536074561567727656) 
         if not channel:
@@ -732,87 +1037,81 @@ class RemovePenaltyModal(discord.ui.Modal, title='إزالة مخالفة ورف
 
         try:
             target_msg = await channel.fetch_message(int(self.msg_id.value))
-            if target_msg.embeds:
-                embed = target_msg.embeds[0]
-                embed.color = discord.Color.green()
-                embed.title = "✅ | [مُنتهية] تعميم رسمي من البنك المركزي"
-                await target_msg.edit(embed=embed)
+            if target_msg.author.id != bot.user.id or not target_msg.embeds:
+                return await interaction.followup.send("❌ الرسالة ليست تعميماً صالحاً أرسله البوت.", ephemeral=True)
+
+            embed = target_msg.embeds[0]
+            embed.color = discord.Color.green()
+            embed.title = "✅ | [مُنتهية] تعميم رسمي من البنك المركزي"
+            await target_msg.edit(embed=embed)
             
             reply_msg = f"**✅ تم الإنتهاء ويتم إزالة التعميم.**\n**السبب:** {self.reason.value}\n**بواسطة:** {interaction.user.mention}"
             await target_msg.reply(reply_msg)
             await interaction.followup.send("✅ **تم إزالة التعميم وتحديث الرسالة بنجاح.**", ephemeral=True)
-        except Exception as e:
+        except (ValueError, discord.NotFound, discord.Forbidden, discord.HTTPException):
+            logger.exception("Could not close penalty notice.")
             await interaction.followup.send("❌ **لم أتمكن من العثور على الرسالة، تأكد من نسخ الآيدي بشكل صحيح.**", ephemeral=True)
 
 
 class IssuePenaltyModal(discord.ui.Modal, title='تحرير مخالفة عدم سداد'):
-    name = discord.ui.TextInput(label='الإسم ( إن وجد )', required=False)
-    player_id = discord.ui.TextInput(label='الإيدي (رقم الهوية)', required=True)
-    amount = discord.ui.TextInput(label='المبلغ المطلوب', required=True)
-    danger = discord.ui.TextInput(label='درجة الخطورة', required=True)
-    squad = discord.ui.TextInput(label='الكتيبة الموجه لها', required=True)
+    name = discord.ui.TextInput(label='الإسم ( إن وجد )', required=False, max_length=100)
+    player_id = discord.ui.TextInput(label='الإيدي (رقم الهوية)', required=True, max_length=50)
+    amount = discord.ui.TextInput(label='المبلغ المطلوب', required=True, max_length=50)
+    danger = discord.ui.TextInput(label='درجة الخطورة', required=True, max_length=100)
+    squad = discord.ui.TextInput(label='الكتيبة الموجه لها', required=True, max_length=100)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # 1. طلب ملف الـ PDF
-        await interaction.response.send_message("**✅ تم حفظ البيانات. الرجاء إرسال [ملف PDF واحد فقط] هنا الآن... معك دقيقتين.**", ephemeral=True)
+        if not await require_administrator(interaction):
+            return
+        await interaction.response.send_message(
+            "**✅ تم حفظ البيانات. أرسل الآن ملف PDF واحداً غير محمي بكلمة مرور خلال دقيقتين.**",
+            ephemeral=True,
+        )
         
         def check_pdf(m):
-            # نتحقق إن المرسل هو نفس الشخص، وإن الرسالة تحتوي على مرفق واحد، وامتداده pdf
-            return m.author == interaction.user and m.channel == interaction.channel and len(m.attachments) == 1 and m.attachments[0].filename.lower().endswith('.pdf')
+            if m.author != interaction.user or m.channel != interaction.channel or len(m.attachments) != 1:
+                return False
+            attachment = m.attachments[0]
+            return (
+                attachment.filename.lower().endswith(".pdf")
+                and attachment.size <= MAX_PDF_BYTES
+                and attachment.content_type in (None, "application/pdf")
+            )
             
         try:
-            # انتظار رسالة الـ PDF
             pdf_msg = await bot.wait_for('message', timeout=120.0, check=check_pdf)
             pdf_attachment = pdf_msg.attachments[0]
-            
-            # 2. طلب كلمة المرور للملف
-            await interaction.followup.send("**✅ ممتاز، تم استلام ملف الـ PDF. الرجاء كتابة [كلمة المرور] الخاصة بالملف الآن كرسالة... معك دقيقة واحدة.**", ephemeral=True)
-            
-            def check_password(m):
-                # نتحقق إن المستخدم أرسل رسالة نصية (كلمة المرور)
-                return m.author == interaction.user and m.channel == interaction.channel and m.content.strip() != ""
-                
+            target_channel = interaction.guild.get_channel(1536074561567727656)
+            if target_channel is None:
+                return await interaction.followup.send("❌ **لم أتمكن من إيجاد روم التعميمات!**", ephemeral=True)
+
+            embed = discord.Embed(
+                title="🚨 | تعميم رسمي من البنك المركزي - وزارة العدل",
+                description="**تم إصدار مذكرة ملاحقة مالية بحق المذكور أدناه لعدم سداد المستحقات المالية.**",
+                color=discord.Color.red(),
+            )
+            embed.add_field(name="👤 الإسم", value=f"**{self.name.value or 'غير معروف'}**", inline=True)
+            embed.add_field(name="💳 الإيدي", value=f"**{self.player_id.value}**", inline=True)
+            embed.add_field(name="💰 المبلغ", value=f"**{self.amount.value}**", inline=False)
+            embed.add_field(name="⚠️ الخطورة", value=f"**{self.danger.value}**", inline=True)
+            embed.add_field(name="🚓 الكتيبة الموجهة", value=f"**{self.squad.value}**", inline=True)
+            embed.set_footer(text=f"تم الإصدار بواسطة: {interaction.user.display_name}")
+
+            file_bytes = await pdf_attachment.read()
+            uploaded_pdf = discord.File(fp=io.BytesIO(file_bytes), filename=pdf_attachment.filename)
+            await target_channel.send(content="@here **🚨 تعميم مالي جديد!**", embed=embed, file=uploaded_pdf)
+            await interaction.followup.send("✅ **تم إصدار التعميم وإرفاق ملف الـ PDF بنجاح!**", ephemeral=True)
+
             try:
-                # انتظار رسالة كلمة المرور
-                pass_msg = await bot.wait_for('message', timeout=60.0, check=check_password)
-                password = pass_msg.content.strip()
-                
-                target_channel = interaction.guild.get_channel(1536074561567727656)
-                
-                embed = discord.Embed(
-                    title="🚨 | تعميم رسمي من البنك المركزي - وزارة العدل",
-                    description="**تم إصدار مذكرة ملاحقة مالية بحق المذكور أدناه لعدم سداد المستحقات المالية.**",
-                    color=discord.Color.red()
-                )
-                embed.add_field(name="👤 الإسم", value=f"**{self.name.value or 'غير معروف'}**", inline=True)
-                embed.add_field(name="💳 الإيدي", value=f"**{self.player_id.value}**", inline=True)
-                embed.add_field(name="💰 المبلغ", value=f"**{self.amount.value}**", inline=False)
-                embed.add_field(name="⚠️ الخطورة", value=f"**{self.danger.value}**", inline=True)
-                embed.add_field(name="🚓 الكتيبة الموجهة", value=f"**{self.squad.value}**", inline=True)
-                embed.add_field(name="🔒 كلمة مرور الملف", value=f"**{password}**", inline=False)
-                embed.set_footer(text=f"تم الإصدار بواسطة: {interaction.user.display_name}")
-
-                # قراءة الملف من الديسكورد وتحويله لملف يمكن إعادة إرساله (عشان ما يعطل لو حذفنا الرسالة الأصلية)
-                file_bytes = await pdf_attachment.read()
-                uploaded_pdf = discord.File(fp=io.BytesIO(file_bytes), filename=pdf_attachment.filename)
-
-                # إرسال التعميم مع الملف المرفق
-                await target_channel.send(content="@here **🚨 تعميم مالي جديد!**", embed=embed, file=uploaded_pdf)
-                
-                await interaction.followup.send("✅ **تم إصدار التعميم وإرفاق ملف الـ PDF بنجاح!**", ephemeral=True)
-                
-                # تنظيف الشات بمسح رسالة الـ PDF ورسالة كلمة المرور اللي أرسلها الإداري
-                try: 
-                    await pdf_msg.delete()
-                    await pass_msg.delete()
-                except: 
-                    pass
-
-            except asyncio.TimeoutError:
-                await interaction.followup.send("❌ **انتهى الوقت ولم تقم بكتابة كلمة المرور. أعد المحاولة من جديد.**", ephemeral=True)
+                await pdf_msg.delete()
+            except discord.Forbidden:
+                logger.warning("Could not delete the source PDF message.")
 
         except asyncio.TimeoutError:
             await interaction.followup.send("❌ **انتهى الوقت أو أنك لم تقم بإرسال ملف بصيغة PDF. أعد المحاولة من جديد.**", ephemeral=True)
+        except discord.DiscordException:
+            logger.exception("Could not issue penalty notice.")
+            await interaction.followup.send("❌ **تعذر إصدار التعميم. تحقق من صلاحيات البوت وحجم الملف.**", ephemeral=True)
 
 
 class BankControlPanel(discord.ui.View):
@@ -821,20 +1120,26 @@ class BankControlPanel(discord.ui.View):
 
     @discord.ui.button(label="إزالة مُخالفة", style=discord.ButtonStyle.success, custom_id="remove_penalty", emoji="✅")
     async def remove_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await require_administrator(interaction):
+            return
         await interaction.response.send_modal(RemovePenaltyModal())
 
     @discord.ui.button(label="تحرير مُخالفة", style=discord.ButtonStyle.danger, custom_id="issue_penalty", emoji="🚨")
     async def issue_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await require_administrator(interaction):
+            return
         await interaction.response.send_modal(IssuePenaltyModal())
 
 @bot.tree.command(name="إستدعاء_تحرير_المخالفات", description="إرسال لوحة التحكم الخاصة بالبنك المركزي")
 async def summon_bank_panel(interaction: discord.Interaction):
-    if interaction.channel.id != 1526668039620395151:
+    if not await require_administrator(interaction):
+        return
+    if interaction.channel_id != 1526668039620395151:
         return await interaction.response.send_message("❌ **هذا الأمر مخصص لروم البنك فقط!**", ephemeral=True)
     
     embed = discord.Embed(
         title="🏦 | لوحة التحكم [ البنك المركزي - وزارة العدل ]",
-        description="**استخدم الأزرار أدناه لإصدار أو إزالة التعميمات المالية الخاصة بالمطلوبين.**\nملاحظة: هذه اللوحة تعمل فقط للموظفين المعتمدين.",
+        description="**استخدم الأزرار أدناه لإصدار أو إزالة التعميمات المالية الخاصة بالمطلوبين.**\nملاحظة: هذه اللوحة تعمل فقط لحاملي صلاحية Administrator.",
         color=discord.Color.dark_theme()
     )
     embed.set_image(url="https://palsawa.com/uploads/images/2022/10/z43kV.jpg")
@@ -846,4 +1151,8 @@ async def summon_bank_panel(interaction: discord.Interaction):
 # ==========================================
 # 🚀 تشغيل السيرفر والبوت
 # ==========================================
-bot.run(os.getenv('TOKEN'))
+if __name__ == "__main__":
+    token = os.getenv("TOKEN")
+    if not token:
+        raise RuntimeError("TOKEN environment variable is required to run the bot.")
+    bot.run(token)
