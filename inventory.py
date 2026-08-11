@@ -831,6 +831,134 @@ async def summon_bank_panel(interaction: discord.Interaction):
     await interaction.response.send_message("✅ **تم استدعاء اللوحة بنجاح.**", ephemeral=True)
 
 # ==========================================
+# 14. آمر ! id
+# ==========================================
+
+@bot.command()
+async def id(ctx, *, name: str):
+    member = None
+    for m in ctx.guild.members:
+        if name.lower() in m.display_name.lower():
+            member = m
+            break
+
+    if member:
+        embed = discord.Embed(title=f"🔍 نتيجة البحث: {member.display_name}", color=discord.Color.blue())
+        embed.add_field(name="الاسم الكامل", value=member.mention, inline=True)
+        embed.add_field(name="User ID", value=f"`{member.id}`", inline=True)
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send(f"❌ لم يتم العثور على أي شخص بهذا الإيدي: `{name}`")
+
+# ==========================================
+# 15. منشن
+# ==========================================
+
+@bot.tree.command(name="mentions", description="حساب عدد المنشنات المرسلة في فترة محددة")
+@app_commands.describe(
+    start_year="سنة بداية الجرد (مثال: 2026)",
+    start_month="شهر بداية الجرد (1-12)",
+    start_day="يوم بداية الجرد (1-31)",
+    end_year="سنة نهاية الجرد (مثال: 2026)",
+    end_month="شهر نهاية الجرد (1-12)",
+    end_day="يوم نهاية الجرد (1-31)"
+)
+async def mentions(
+    interaction: discord.Interaction,
+    start_year: int, start_month: int, start_day: int,
+    end_year: int, end_month: int, end_day: int
+):
+    if not has_single_role(interaction, MENTIONS_COUNT_ALLOWED_ROLE):
+        await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
+        return
+
+    try:
+        start_date = datetime.datetime(start_year, start_month, start_day, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        end_date = datetime.datetime(end_year, end_month, end_day, 23, 59, 59, tzinfo=datetime.timezone.utc)
+    except ValueError:
+        await interaction.response.send_message("❌ التاريخ الذي أدخلته غير صحيح!", ephemeral=True)
+        return
+
+    await interaction.response.send_message(f"⏳ جاري حساب المنشنات من `{start_day}/{start_month}/{start_year}` إلى `{end_day}/{end_month}/{end_year}`...", ephemeral=True)
+    stats = {}
+
+    async for msg in interaction.channel.history(after=start_date, before=end_date, limit=None):
+        if msg.mentions and not msg.author.bot:
+            stats[msg.author.id] = stats.get(msg.author.id, 0) + len(msg.mentions)
+
+    report_title = f"منشنات قناة #{interaction.channel.name} ({start_day}/{start_month} - {end_day}/{end_month})"
+    embed_result = format_report_as_embed(report_title, stats, interaction.guild, "منشن", discord.Color.orange())
+    await interaction.edit_original_response(content=None, embed=embed_result)
+
+# ==========================================
+# 16. رسائل
+# ==========================================
+
+@bot.tree.command(name="count", description="حساب عدد الرسائل لكل شخص في فترة محددة")
+@app_commands.describe(
+    start_year="سنة بداية الجرد (مثال: 2026)",
+    start_month="شهر بداية الجرد (1-12)",
+    start_day="يوم بداية الجرد (1-31)",
+    end_year="سنة نهاية الجرد (مثال: 2026)",
+    end_month="شهر نهاية الجرد (1-12)",
+    end_day="يوم نهاية الجرد (1-31)"
+)
+async def count(
+    interaction: discord.Interaction,
+    start_year: int, start_month: int, start_day: int,
+    end_year: int, end_month: int, end_day: int
+):
+    if not has_single_role(interaction, MENTIONS_COUNT_ALLOWED_ROLE):
+        await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
+        return
+
+    try:
+        start_date = datetime.datetime(start_year, start_month, start_day, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        end_date = datetime.datetime(end_year, end_month, end_day, 23, 59, 59, tzinfo=datetime.timezone.utc)
+    except ValueError:
+        await interaction.response.send_message("❌ التاريخ الذي أدخلته غير صحيح!", ephemeral=True)
+        return
+
+    await interaction.response.send_message(f"⏳ جاري حساب الرسائل من `{start_day}/{start_month}/{start_year}` إلى `{end_day}/{end_month}/{end_year}`...", ephemeral=True)
+    stats = {}
+
+    async for msg in interaction.channel.history(after=start_date, before=end_date, limit=None):
+        if not msg.author.bot:
+            stats[msg.author.id] = stats.get(msg.author.id, 0) + 1
+
+    report_title = f"رسائل قناة #{interaction.channel.name} ({start_day}/{start_month} - {end_day}/{end_month})"
+    embed_result = format_report_as_embed(report_title, stats, interaction.guild, "رسالة", discord.Color.green())
+    await interaction.edit_original_response(content=None, embed=embed_result)
+
+# ==========================================
+# 16. ضباط
+ # ==========================================
+@bot.tree.command(name="check_officers", description="جرد نقاط الضباط")
+async def check_officers(interaction: discord.Interaction):
+    if not has_role(interaction, OFFICERS_ALLOWED_ROLES):
+        await interaction.response.send_message("❌ ليس لديك الصلاحية لاستخدام هذا الأمر.", ephemeral=True)
+        return
+
+    if interaction.channel_id != OFFICERS_AUDIT_CHANNEL_ID:
+        await interaction.response.send_message(f"❌ يمكنك استخدام هذا الأمر فقط داخل الروم المخصصة: <#{OFFICERS_AUDIT_CHANNEL_ID}>", ephemeral=True)
+        return
+
+    await interaction.response.send_message("⏳ جاري جرد نقاط الضباط...", ephemeral=True)
+    eight_days_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)
+    stats = {}
+    
+    for cid, pts in OFFICER_CHANNELS.items():
+        channel = bot.get_channel(cid)
+        if channel:
+            async for msg in channel.history(after=eight_days_ago, limit=None):
+                if msg.attachments and not msg.author.bot:
+                    stats[msg.author.id] = stats.get(msg.author.id, 0) + pts
+                    
+    embed_result = format_report_as_embed("ترتيب الضباط (حسب الصور)", stats, interaction.guild, "نقطة")
+    await interaction.edit_original_response(content=None, embed=embed_result)
+
+
+# ==========================================
 # 🚀 تشغيل السيرفر والبوت
 # ==========================================
 bot.run(os.getenv('TOKEN'))
